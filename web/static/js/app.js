@@ -20,7 +20,24 @@
 
 // import socket from "./socket"
 
-const elmContainer = document.getElementById('my-spotify-groomer');
-if (elmContainer) {
+((document, window) => {
+  if (!window.location.hash) return redirectToLoginPage(window);
+
+  const hashParts = window.location.hash.match(/access_token=(.*)&token_type/);
+  if (!hashParts) return redirectToLoginPage(window);
+
+  const accessToken = hashParts[1];
+
+  const elmContainer = document.getElementById('my-spotify-groomer');
+  if (!elmContainer) return;
+
   const elmApp = Elm.MySpotifyGroomer.embed(elmContainer);
+  elmApp.ports.accessToken.send(accessToken);
+})(document, window);
+
+function redirectToLoginPage(window) {
+  const isOnLoginPage = /\/login$/.test(window.location.href);
+  if (!isOnLoginPage) {
+    window.location.replace('/login');
+  }
 }

@@ -1,6 +1,8 @@
-module MySpotifyGroomer exposing (..)
+port module MySpotifyGroomer exposing (..)
 
 import Html exposing (Html, program, button, div, text, a)
+import Http exposing (header, emptyBody, expectStringResponse)
+import Navigation exposing (load)
 
 
 main : Program Never Model Msg
@@ -27,22 +29,53 @@ type alias Model =
 
 init : ( Model, Cmd Msg )
 init =
-    ( "", Cmd.none )
+    ( "Not yet", Cmd.none )
 
 
 
 -- UPDATE
 
 
+type alias AccessToken =
+    String
+
+
 type Msg
-    = Nothing
+    = FetchData (Result Http.Error String)
+    | LoggedIn AccessToken
 
 
 update : Msg -> Model -> ( Model, Cmd Msg )
 update msg model =
     case msg of
-        Nothing ->
-            ( "", Cmd.none )
+        FetchData (Ok model) ->
+            ( model, Cmd.none )
+
+        FetchData (Err _) ->
+            ( "Failed to fetch data", load "/login" )
+
+        LoggedIn accessToken ->
+            ( "Fetching the accessToken…", fetchData accessToken )
+
+
+fetchData : AccessToken -> Cmd Msg
+fetchData accessToken =
+    let
+        authorizationHeader =
+            header "Authorization" ("Bearer " ++ accessToken)
+
+        request =
+            Http.request
+                { method = "GET"
+                , headers = [ authorizationHeader ]
+                , url = "https://api.spotify.com/v1/me"
+                , body = emptyBody
+                , expect = expectStringResponse (\_ -> Ok "Yes!")
+                , timeout = Nothing
+                , withCredentials = False
+                }
+    in
+        Http.send FetchData request
 
 
 
@@ -52,13 +85,16 @@ update msg model =
 view : Model -> Html Msg
 view model =
     div []
-        [ text "You're connected!" ]
+        [ text ("You're connected? " ++ model) ]
 
 
 
 -- SUBSCRIPTIONS
 
 
+port accessToken : (String -> msg) -> Sub msg
+
+
 subscriptions : Model -> Sub Msg
 subscriptions model =
-    Sub.none
+    accessToken LoggedIn
