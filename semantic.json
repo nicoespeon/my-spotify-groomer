@@ -23,7 +23,10 @@
     "site",
     "button",
     "container",
-    "grid"
+    "grid",
+    "list",
+    "table",
+    "image"
   ],
   "version": "2.2.13"
 }
