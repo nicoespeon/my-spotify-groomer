@@ -1,8 +1,10 @@
 port module MySpotifyGroomer exposing (..)
 
-import Html exposing (Html, program, button, div, text, a)
-import Http exposing (header, emptyBody, expectStringResponse)
+import Html exposing (Html, program, button, div, text, a, img)
+import Html.Attributes exposing (src)
+import Http exposing (header, emptyBody, expectJson)
 import Navigation exposing (load)
+import Json.Decode as Decode exposing (at, string, list)
 
 
 main : Program Never Model Msg
@@ -20,7 +22,22 @@ main =
 
 
 type alias Model =
-    String
+    { fetchUserStatus : FetchUserStatuses
+    , user : User
+    }
+
+
+type alias User =
+    { name : String
+    , profilePictureUrl : Maybe String
+    }
+
+
+type FetchUserStatuses
+    = NotStarted
+    | Fetching
+    | Error
+    | Success
 
 
 
@@ -29,37 +46,44 @@ type alias Model =
 
 init : ( Model, Cmd Msg )
 init =
-    ( "Not yet", Cmd.none )
+    ( emptyModel, Cmd.none )
+
+
+emptyModel : Model
+emptyModel =
+    { fetchUserStatus = NotStarted
+    , user = User "" Nothing
+    }
 
 
 
 -- UPDATE
 
 
+type Msg
+    = LogIn AccessToken
+    | FetchUser (Result Http.Error User)
+
+
 type alias AccessToken =
     String
-
-
-type Msg
-    = FetchData (Result Http.Error String)
-    | LoggedIn AccessToken
 
 
 update : Msg -> Model -> ( Model, Cmd Msg )
 update msg model =
     case msg of
-        FetchData (Ok model) ->
-            ( model, Cmd.none )
+        FetchUser (Ok user) ->
+            ( { model | fetchUserStatus = Success, user = user }, Cmd.none )
 
-        FetchData (Err _) ->
-            ( "Failed to fetch data", load "/login" )
+        FetchUser (Err _) ->
+            ( { model | fetchUserStatus = Error }, load "/login" )
 
-        LoggedIn accessToken ->
-            ( "Fetching the accessToken…", fetchData accessToken )
+        LogIn accessToken ->
+            ( { model | fetchUserStatus = Fetching }, fetchUser accessToken )
 
 
-fetchData : AccessToken -> Cmd Msg
-fetchData accessToken =
+fetchUser : AccessToken -> Cmd Msg
+fetchUser accessToken =
     let
         authorizationHeader =
             header "Authorization" ("Bearer " ++ accessToken)
@@ -70,12 +94,22 @@ fetchData accessToken =
                 , headers = [ authorizationHeader ]
                 , url = "https://api.spotify.com/v1/me"
                 , body = emptyBody
-                , expect = expectStringResponse (\_ -> Ok "Yes!")
+                , expect = expectJson userDecoder
                 , timeout = Nothing
                 , withCredentials = False
                 }
     in
-        Http.send FetchData request
+        Http.send FetchUser request
+
+
+userDecoder : Decode.Decoder User
+userDecoder =
+    Decode.map2 User
+        (at [ "display_name" ] string)
+        (Decode.map
+            List.head
+            (at [ "images" ] (list (at [ "url" ] string)))
+        )
 
 
 
@@ -84,8 +118,31 @@ fetchData accessToken =
 
 view : Model -> Html Msg
 view model =
-    div []
-        [ text ("You're connected? " ++ model) ]
+    case model.fetchUserStatus of
+        NotStarted ->
+            text "Fetch of user data has not started yet."
+
+        Fetching ->
+            text "Fetching user data from Spotify…"
+
+        Error ->
+            text "Something went wrong when user data were fetched!"
+
+        Success ->
+            renderUser model.user
+
+
+renderUser : User -> Html Msg
+renderUser user =
+    case user.profilePictureUrl of
+        Just profilePictureUrl ->
+            div []
+                [ img [ src profilePictureUrl ] []
+                , text ("Hello " ++ user.name)
+                ]
+
+        Nothing ->
+            text ("Hello " ++ user.name)
 
 
 
@@ -97,4 +154,4 @@ port accessToken : (String -> msg) -> Sub msg
 
 subscriptions : Model -> Sub Msg
 subscriptions model =
-    accessToken LoggedIn
+    accessToken LogIn
