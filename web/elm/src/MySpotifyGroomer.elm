@@ -2,9 +2,11 @@ port module MySpotifyGroomer exposing (..)
 
 import Html exposing (Html, program, button, div, span, text, a, img, h2)
 import Html.Attributes exposing (src, class)
-import Http exposing (Error, Request, header, emptyBody, expectJson)
+import Html.Events exposing (onClick)
+import Http exposing (Error, Request, header, emptyBody, jsonBody, expectJson)
 import Navigation exposing (load)
 import Json.Decode as Decode exposing (Decoder, at, list, string, int)
+import Json.Encode as Encode exposing (object)
 import Task exposing (Task)
 
 
@@ -31,22 +33,37 @@ type alias Model =
 
 
 type alias User =
-    { name : String
+    { id : UserId
+    , name : String
     , profilePictureUrl : Maybe String
     }
 
 
+type alias UserId =
+    String
+
+
 type alias Playlist =
-    { name : String
+    { id : PlaylistId
+    , name : String
     , tracksUrl : String
     , tracks : List Track
     }
 
 
+type alias PlaylistId =
+    String
+
+
 type alias Track =
-    { name : String
+    { uri : TrackUri
+    , name : String
     , popularity : Int
     }
+
+
+type alias TrackUri =
+    String
 
 
 type alias TracksResponse =
@@ -59,6 +76,7 @@ type FetchStatus
     = NotStarted
     | FetchingUser
     | FetchingPlaylists
+    | DeletingTrack
     | Error
     | Success
 
@@ -76,7 +94,7 @@ emptyModel : Model
 emptyModel =
     { accessToken = ""
     , fetchStatus = NotStarted
-    , user = User "" Nothing
+    , user = User "" "" Nothing
     , playlists = []
     }
 
@@ -87,8 +105,10 @@ emptyModel =
 
 type Msg
     = LogIn AccessToken
-    | FetchUser (Result Error User)
-    | FetchPlaylists (Result Error (List Playlist))
+    | UserFetched (Result Error User)
+    | PlaylistsFetched (Result Error (List Playlist))
+    | DeleteTrack PlaylistId TrackUri
+    | TrackDeleted (Result Error (List Playlist))
 
 
 type alias AccessToken =
@@ -101,16 +121,25 @@ update msg model =
         LogIn accessToken ->
             ( { model | fetchStatus = FetchingUser, accessToken = accessToken }, fetchUser accessToken )
 
-        FetchUser (Ok user) ->
+        UserFetched (Ok user) ->
             ( { model | fetchStatus = FetchingPlaylists, user = user }, fetchPlaylistsWithTracks model.accessToken )
 
-        FetchUser (Err _) ->
+        UserFetched (Err _) ->
             ( { model | fetchStatus = Error }, load "/login" )
 
-        FetchPlaylists (Ok playlists) ->
+        PlaylistsFetched (Ok playlists) ->
             ( { model | fetchStatus = Success, playlists = playlists }, Cmd.none )
 
-        FetchPlaylists (Err _) ->
+        PlaylistsFetched (Err _) ->
+            ( { model | fetchStatus = Error }, Cmd.none )
+
+        DeleteTrack playlistId trackUri ->
+            ( { model | fetchStatus = DeletingTrack }, deleteTrackFromPlaylist model playlistId trackUri )
+
+        TrackDeleted (Ok playlists) ->
+            ( { model | fetchStatus = Success, playlists = playlists }, Cmd.none )
+
+        TrackDeleted (Err _) ->
             ( { model | fetchStatus = Error }, Cmd.none )
 
 
@@ -137,21 +166,21 @@ fetchUser accessToken =
         url =
             "https://api.spotify.com/v1/me"
     in
-        Http.send FetchUser (getFromSpotify accessToken url userDecoder)
+        Http.send UserFetched (getFromSpotify accessToken url userDecoder)
 
 
 fetchPlaylistsWithTracks : AccessToken -> Cmd Msg
 fetchPlaylistsWithTracks accessToken =
     fetchPlaylists accessToken
         |> Task.andThen (fetchPlaylistsTracks accessToken)
-        |> Task.attempt FetchPlaylists
+        |> Task.attempt PlaylistsFetched
 
 
 fetchPlaylists : AccessToken -> Task Error (List Playlist)
 fetchPlaylists accessToken =
     let
         url =
-            "https://api.spotify.com/v1/me/playlists?fields=items(name,tracks.href)&limit=50"
+            "https://api.spotify.com/v1/me/playlists?fields=items(id,name,tracks.href)&limit=50"
     in
         getFromSpotify accessToken url playlistsDecoder
             |> Http.toTask
@@ -168,7 +197,7 @@ fetchPlaylistTracks : AccessToken -> Playlist -> Task Error Playlist
 fetchPlaylistTracks accessToken playlist =
     let
         url =
-            playlist.tracksUrl ++ "?fields=items(track.name,track.popularity),next"
+            playlist.tracksUrl ++ "?fields=items(track.name,track.popularity,track.uri),next"
     in
         fetchPlaylistTracksWithUrl accessToken playlist url
 
@@ -201,13 +230,60 @@ updatePlaylistWithTracks playlist tracks =
         Task.succeed { playlist | tracks = newTracks }
 
 
+deleteTrackFromPlaylist : Model -> PlaylistId -> TrackUri -> Cmd Msg
+deleteTrackFromPlaylist model playlistId trackUri =
+    let
+        updatedPlaylists =
+            playlistsWithoutTrack trackUri model.playlists
+
+        authorizationHeader =
+            header "Authorization" ("Bearer " ++ model.accessToken)
+
+        url =
+            "https://api.spotify.com/v1/users/" ++ model.user.id ++ "/playlists/" ++ playlistId ++ "/tracks"
+
+        body =
+            object
+                [ ( "tracks"
+                  , Encode.list
+                        [ object
+                            [ ( "uri", Encode.string trackUri ) ]
+                        ]
+                  )
+                ]
+
+        deleteRequest =
+            Http.request
+                { method = "DELETE"
+                , headers = [ authorizationHeader ]
+                , url = url
+                , body = jsonBody body
+                , expect = expectJson (Decode.succeed updatedPlaylists)
+                , timeout = Nothing
+                , withCredentials = False
+                }
+    in
+        Http.send TrackDeleted (deleteRequest)
+
+
+playlistsWithoutTrack : TrackUri -> List Playlist -> List Playlist
+playlistsWithoutTrack trackUri =
+    List.map
+        (\playlist ->
+            { playlist
+                | tracks = List.filter (\track -> track.uri /= trackUri) playlist.tracks
+            }
+        )
+
+
 
 -- DECODERS
 
 
 userDecoder : Decoder User
 userDecoder =
-    Decode.map2 User
+    Decode.map3 User
+        (at [ "id" ] string)
         (at [ "display_name" ] string)
         (Decode.map
             List.head
@@ -219,7 +295,8 @@ playlistsDecoder : Decoder (List Playlist)
 playlistsDecoder =
     at [ "items" ]
         (Decode.list
-            (Decode.map3 Playlist
+            (Decode.map4 Playlist
+                (at [ "id" ] string)
                 (at [ "name" ] string)
                 (at [ "tracks", "href" ] string)
                 (Decode.succeed [])
@@ -232,7 +309,8 @@ tracksDecoder =
     Decode.map2 TracksResponse
         (at [ "items" ]
             (Decode.list
-                (Decode.map2 Track
+                (Decode.map3 Track
+                    (at [ "track", "uri" ] string)
                     (at [ "track", "name" ] string)
                     (at [ "track", "popularity" ] int)
                 )
@@ -261,6 +339,12 @@ view model =
             div []
                 [ renderUser model.user
                 , text "Fetching playlists data from Spotify…"
+                ]
+
+        DeletingTrack ->
+            div []
+                [ renderUser model.user
+                , text "Deleting track…"
                 ]
 
         Success ->
@@ -294,15 +378,17 @@ renderPlaylist playlist =
         , div [ class "ui list" ]
             (playlist.tracks
                 |> List.sortBy .popularity
-                |> List.map renderTrack
+                |> List.map (renderTrack playlist.id)
             )
         ]
 
 
-renderTrack : Track -> Html Msg
-renderTrack track =
+renderTrack : PlaylistId -> Track -> Html Msg
+renderTrack playlistId track =
     div [ class "item" ]
-        [ text ("(" ++ (toString track.popularity) ++ ") " ++ track.name) ]
+        [ button [ onClick (DeleteTrack playlistId track.uri) ] [ text "x" ]
+        , text ("(" ++ (toString track.popularity) ++ ") " ++ track.name)
+        ]
 
 
 

@@ -18,7 +18,7 @@ defmodule MySpotifyGroomer.SpotifyController do
             "client_id" => "b0cfa00850ee49009f88a7747681d01b",
             "response_type" => "token",
             "redirect_uri" => MySpotifyGroomer.Router.Helpers.url(conn),
-            "scope" => "user-read-private user-read-email playlist-read-private playlist-read-collaborative"
+            "scope" => "user-read-private user-read-email playlist-read-private playlist-read-collaborative playlist-modify-public playlist-modify-private"
         }
 
         redirect conn, external: spotify_uri <> spotify_params
