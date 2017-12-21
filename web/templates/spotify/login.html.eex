@@ -1,3 +1,7 @@
-<a href="/login-with-spotify" class="ui fluid primary button">
-    Log in with Spotify
-</a>
+<div class="text-center">
+    <h1>My Spotify Groomer</h1>
+
+    <a href="/login-with-spotify" class="ui primary massive button">
+        Log in with Spotify
+    </a>
+</div>
