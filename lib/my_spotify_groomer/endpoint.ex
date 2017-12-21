@@ -9,7 +9,11 @@ defmodule MySpotifyGroomer.Endpoint do
   # when deploying your static files in production.
   plug Plug.Static,
     at: "/", from: :starter_kit_phoenix_elm, gzip: false,
-    only: ~w(css fonts images js favicon.ico robots.txt)
+    only: ~w(css fonts images themes js favicon.ico robots.txt)
+
+  plug Plug.Static,
+    at: "/css/assets", from: "priv/static", gzip: false,
+    only: ~w(themes)
 
   # Code reloading can be explicitly enabled under the
   # :code_reloader configuration of your endpoint.

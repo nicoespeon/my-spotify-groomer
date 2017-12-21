@@ -11,7 +11,7 @@
       "packaged": "../web/static/vendor/semantic/",
       "uncompressed": "../web/static/vendor/semantic/components/",
       "compressed": "../web/static/vendor/semantic/components/",
-      "themes": "../web/static/vendor/semantic/themes/"
+      "themes": "../web/static/vendor/semantic/assets/themes/"
     },
     "clean": "dist/"
   },

@@ -2,11 +2,11 @@ exports.config = {
   // See http://brunch.io/#documentation for docs.
   files: {
     javascripts: {
-      joinTo: "js/app.js",
+      joinTo: 'js/app.js',
       order: {
         before: [
-          "web/static/vendor/jquery.min.js",
-          "web/static/vendor/semantic/semantic.js"
+          'web/static/vendor/jquery.min.js',
+          'web/static/vendor/semantic/semantic.js'
         ]
       }
 
@@ -26,13 +26,13 @@ exports.config = {
       // }
     },
     stylesheets: {
-      joinTo: "css/app.css",
+      joinTo: 'css/app.css',
       order: {
-        after: ["web/static/css/app.css"] // concat app.css last
+        after: ['web/static/css/app.css'] // concat app.css last
       }
     },
     templates: {
-      joinTo: "js/app.js"
+      joinTo: 'js/app.js'
     }
   },
 
@@ -40,20 +40,16 @@ exports.config = {
     // This option sets where we should place non-css and non-js assets in.
     // By default, we set this to "/web/static/assets". Files in this directory
     // will be copied to `paths.public`, which is "priv/static" by default.
-    assets: /^(web\/static\/assets)/
+    assets: /^(web\/static\/(assets|vendor\/semantic\/assets))/
   },
 
   // Phoenix paths configuration
   paths: {
     // Dependencies and current project directories to watch
-    watched: [
-      "web/static",
-      "test/static",
-      "web/elm/src/MySpotifyGroomer.elm"
-    ],
+    watched: ['web/static', 'web/elm/src/MySpotifyGroomer.elm'],
 
     // Where to compile files to
-    public: "priv/static"
+    public: 'priv/static'
   },
 
   // Configure your plugins
@@ -63,16 +59,16 @@ exports.config = {
       ignore: [/web\/static\/vendor/]
     },
     elmBrunch: {
-      executablePath: "../../node_modules/elm/binwrappers",
-      elmFolder: "web/elm",
-      mainModules: ["src/MySpotifyGroomer.elm"],
-      outputFolder: "../static/vendor"
+      executablePath: '../../node_modules/elm/binwrappers',
+      elmFolder: 'web/elm',
+      mainModules: ['src/MySpotifyGroomer.elm'],
+      outputFolder: '../static/vendor'
     }
   },
 
   modules: {
     autoRequire: {
-      "js/app.js": ["web/static/js/app"]
+      'js/app.js': ['web/static/js/app']
     }
   },
 
