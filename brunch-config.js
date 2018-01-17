@@ -46,7 +46,10 @@ exports.config = {
   // Phoenix paths configuration
   paths: {
     // Dependencies and current project directories to watch
-    watched: ['web/static', 'web/elm/src/MySpotifyGroomer.elm'],
+    watched: [
+      'web/static',
+      'web/elm/src'
+    ],
 
     // Where to compile files to
     public: 'priv/static'
