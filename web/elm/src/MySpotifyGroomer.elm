@@ -4,7 +4,7 @@ import Html exposing (Html, program, h1, div, text, nav)
 import Html.Attributes exposing (class)
 import Http exposing (Error)
 import Navigation exposing (load)
-import SemanticUI exposing (loader, loaderBlock)
+import SemanticUI exposing (confirm, loader, loaderBlock)
 import Spotify exposing (AccessToken, get, getRequest, delete)
 import Track exposing (Track, TrackUri, Playlist, PlaylistId)
 import User exposing (User, UserId)
@@ -37,6 +37,7 @@ type State
     = Blank
     | Loading
     | Errored String
+    | AskingToDeleteTrack Playlist Track
     | LoadingPlaylists String
     | PlaylistSelection
     | LoadingTracks
@@ -70,6 +71,7 @@ type Msg
     | PlaylistsFetched (Result Error (List Playlist))
     | SelectPlaylist PlaylistId
     | PlaylistTracksFetched (Result Error Playlist)
+    | AskToDeleteTrack Playlist Track
     | DeleteTrack PlaylistId TrackUri
     | TrackDeleted PlaylistId (Result Error (List Playlist))
 
@@ -136,6 +138,11 @@ update msg model =
 
         PlaylistTracksFetched (Err _) ->
             ( { model | state = Errored "Failed to fetch playlist tracks." }
+            , Cmd.none
+            )
+
+        AskToDeleteTrack playlist track ->
+            ( { model | state = AskingToDeleteTrack playlist track }
             , Cmd.none
             )
 
@@ -217,7 +224,7 @@ view model =
                 [ mainNav model.user
                 , mainContainer
                     [ pageTitle
-                    , Track.viewPlaylistSelectForm SelectPlaylist model.playlists
+                    , viewPlaylistSelectForm model.playlists
                     ]
                 ]
 
@@ -226,7 +233,7 @@ view model =
                 [ mainNav model.user
                 , mainContainer
                     [ pageTitle
-                    , Track.viewPlaylistSelectForm SelectPlaylist model.playlists
+                    , viewPlaylistSelectForm model.playlists
                     , loaderBlock "Fetching playlist tracks…"
                     ]
                 ]
@@ -236,8 +243,8 @@ view model =
                 [ mainNav model.user
                 , mainContainer
                     [ pageTitle
-                    , Track.viewPlaylistSelectForm SelectPlaylist model.playlists
-                    , Track.viewPlaylistTracks DeleteTrack playlist
+                    , viewPlaylistSelectForm model.playlists
+                    , Track.viewPlaylistTracks AskToDeleteTrack playlist
                     ]
                 ]
 
@@ -249,6 +256,15 @@ view model =
 
         Errored message ->
             text ("An error occurred: " ++ message)
+
+        AskingToDeleteTrack playlist track ->
+            div []
+                [ mainNav model.user
+                , mainContainer
+                    [ pageTitle
+                    , viewConfirmDeleteTrack model playlist track
+                    ]
+                ]
 
 
 mainContainer : List (Html Msg) -> Html Msg
@@ -272,6 +288,22 @@ mainNav user =
                 [ User.view user ]
             ]
         ]
+
+
+viewPlaylistSelectForm : List Playlist -> Html Msg
+viewPlaylistSelectForm =
+    Track.viewPlaylistSelectForm SelectPlaylist
+
+
+viewConfirmDeleteTrack : Model -> Playlist -> Track -> Html Msg
+viewConfirmDeleteTrack model playlist track =
+    Track.viewConfirmDeleteTrack
+        (confirm
+            (DeleteTrack playlist.id track.uri)
+            (SelectPlaylist playlist.id)
+        )
+        playlist
+        track
 
 
 

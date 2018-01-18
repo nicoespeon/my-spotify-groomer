@@ -9,6 +9,7 @@ module Track
         , fetchPlaylists
         , fetchPlaylistTracks
         , selectedPlaylist
+        , viewConfirmDeleteTrack
         , viewPlaylistSelectForm
         , viewPlaylistTracks
         )
@@ -235,7 +236,7 @@ viewPlaylistSelectForm onInputMsg playlists =
             ]
 
 
-viewPlaylistTracks : (PlaylistId -> TrackUri -> a) -> Playlist -> Html a
+viewPlaylistTracks : (Playlist -> Track -> a) -> Playlist -> Html a
 viewPlaylistTracks onDeleteButtonMsg playlist =
     div []
         [ h2
@@ -252,25 +253,43 @@ viewPlaylistTracks onDeleteButtonMsg playlist =
             ]
         , div
             [ class "ui divided relaxed list" ]
-            (List.map (viewTrack onDeleteButtonMsg playlist.id) playlist.tracks)
+            (List.map (viewTrack (onDeleteButtonMsg playlist)) playlist.tracks)
         ]
 
 
-viewTrack : (PlaylistId -> TrackUri -> a) -> PlaylistId -> Track -> Html a
-viewTrack onDeleteButtonMsg playlistId track =
+viewTrack : (Track -> a) -> Track -> Html a
+viewTrack onDeleteButtonMsg track =
     div [ class "item" ]
         [ div
             [ class "right floated content" ]
-            [ viewDeleteTrackButton onDeleteButtonMsg playlistId track ]
+            [ viewDeleteTrackButton onDeleteButtonMsg track ]
         , div
             [ class "content" ]
             [ p [ class "header" ] [ text track.name ] ]
         ]
 
 
-viewDeleteTrackButton : (PlaylistId -> TrackUri -> a) -> PlaylistId -> Track -> Html a
-viewDeleteTrackButton onDeleteButtonMsg playlistId track =
+viewDeleteTrackButton : (Track -> a) -> Track -> Html a
+viewDeleteTrackButton onDeleteButtonMsg track =
     if track.isLocal then
         disabledDeleteButton "I can't delete local files from your playlist (yet)"
     else
-        deleteButton (onDeleteButtonMsg playlistId track.uri)
+        deleteButton (onDeleteButtonMsg track)
+
+
+viewConfirmDeleteTrack : (Html a -> String -> String -> Html a) -> Playlist -> Track -> Html a
+viewConfirmDeleteTrack confirm playlist track =
+    let
+        message =
+            div []
+                [ text "Do you really want to delete "
+                , strong [] [ text track.name ]
+                , text " from "
+                , strong [] [ text playlist.name ]
+                , text "?"
+                ]
+    in
+        confirm
+            message
+            "Yes, delete it"
+            "No, keep the track"
