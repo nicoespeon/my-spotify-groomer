@@ -14,14 +14,16 @@ module Track
         , viewPlaylistTracks
         )
 
+import Date exposing (Date)
 import Html exposing (Html, text, form, div, label, option, select, h2, i, p, strong)
 import Html.Attributes exposing (class, value, disabled, selected)
 import Html.Events exposing (onInput)
 import Http exposing (Error, Request)
-import Json.Decode as Decode exposing (Decoder, at, string, bool, map2, map3, map5, succeed)
+import Json.Decode as Decode exposing (Decoder, at, string, bool)
 import Json.Encode as Encode
 import SemanticUI exposing (disabledDeleteButton, deleteButton)
 import Task exposing (Task)
+import Time exposing (Time)
 import User exposing (UserId)
 
 
@@ -45,6 +47,7 @@ type alias Track =
     { uri : TrackUri
     , name : String
     , isLocal : Bool
+    , addedAt : Date
     }
 
 
@@ -85,12 +88,12 @@ playlistsDecoder : Decoder (List Playlist)
 playlistsDecoder =
     at [ "items" ]
         (Decode.list
-            (map5 Playlist
+            (Decode.map5 Playlist
                 (at [ "id" ] string)
                 (at [ "owner", "id" ] string)
                 (at [ "name" ] string)
                 (at [ "tracks", "href" ] string)
-                (succeed [])
+                (Decode.succeed [])
             )
         )
 
@@ -115,17 +118,32 @@ tracksDecoder : Decoder (List Track)
 tracksDecoder =
     at [ "items" ]
         (Decode.list
-            (map3 Track
+            (Decode.map4 Track
                 (at [ "track", "uri" ] string)
                 (at [ "track", "name" ] string)
                 (at [ "is_local" ] bool)
+                (at [ "added_at" ] decodeDate)
             )
         )
 
 
+decodeDate : Decoder Date
+decodeDate =
+    string
+        |> Decode.andThen
+            (\val ->
+                case Date.fromString val of
+                    Ok date ->
+                        Decode.succeed date
+
+                    Err err ->
+                        Decode.fail err
+            )
+
+
 paginatedTracksDecoder : Decoder PaginatedTracks
 paginatedTracksDecoder =
-    map2 PaginatedTracks
+    Decode.map2 PaginatedTracks
         tracksDecoder
         (Decode.maybe (at [ "next" ] string))
 
@@ -133,33 +151,43 @@ paginatedTracksDecoder =
 fetchPlaylistTracks :
     (Result Error Playlist -> a)
     -> (String -> Decoder PaginatedTracks -> Request PaginatedTracks)
+    -> Time
     -> Playlist
     -> List TrackUri
     -> Cmd a
-fetchPlaylistTracks msg fetch playlist favoriteTrackUris =
+fetchPlaylistTracks msg fetch referenceTime playlist favoriteTrackUris =
     let
         url =
-            playlist.tracksUrl ++ "?fields=items(track.name,track.uri,is_local),next"
+            playlist.tracksUrl ++ "?fields=items(track.name,track.uri,is_local,added_at),next"
     in
-        Task.attempt msg (fetchPlaylistTracksWithUrl fetch favoriteTrackUris url playlist)
+        Task.attempt
+            msg
+            (fetchPlaylistTracksWithUrl fetch referenceTime favoriteTrackUris url playlist)
 
 
 fetchPlaylistTracksWithUrl :
     (String -> Decoder PaginatedTracks -> Request PaginatedTracks)
+    -> Time
     -> List TrackUri
     -> String
     -> Playlist
     -> Task Error Playlist
-fetchPlaylistTracksWithUrl fetch favoriteTrackUris url playlist =
+fetchPlaylistTracksWithUrl fetch referenceTime favoriteTrackUris url playlist =
     Http.toTask (fetch url paginatedTracksDecoder)
         |> Task.andThen
             (\pt ->
                 let
                     addTracks =
-                        addTracksToPlaylist playlist favoriteTrackUris
+                        addTracksToPlaylist
+                            referenceTime
+                            playlist
+                            favoriteTrackUris
 
                     fetchAgain =
-                        fetchPlaylistTracksWithUrl fetch favoriteTrackUris
+                        fetchPlaylistTracksWithUrl
+                            fetch
+                            referenceTime
+                            favoriteTrackUris
                 in
                     case pt.next of
                         Just nextUrl ->
@@ -171,15 +199,38 @@ fetchPlaylistTracksWithUrl fetch favoriteTrackUris url playlist =
             )
 
 
-addTracksToPlaylist : Playlist -> List TrackUri -> List Track -> Task Error Playlist
-addTracksToPlaylist playlist favoriteTrackUris tracks =
+addTracksToPlaylist : Time -> Playlist -> List TrackUri -> List Track -> Task Error Playlist
+addTracksToPlaylist referenceTime playlist favoriteTrackUris tracks =
     let
         newTracks =
             playlist.tracks
                 |> List.append tracks
-                |> List.filter (\track -> not (List.member track.uri favoriteTrackUris))
+                |> List.filter (isTrackNotListenedAnymore referenceTime favoriteTrackUris)
     in
         Task.succeed { playlist | tracks = newTracks }
+
+
+isTrackNotListenedAnymore : Time -> List TrackUri -> Track -> Bool
+isTrackNotListenedAnymore referenceTime favoriteTrackUris track =
+    not (List.member track.uri favoriteTrackUris)
+        && hasBeenCreated7DaysBefore referenceTime track
+
+
+hasBeenCreated7DaysBefore : Time -> Track -> Bool
+hasBeenCreated7DaysBefore referenceTime track =
+    let
+        referenceTimeInMs =
+            Time.inMilliseconds referenceTime
+
+        msFor7Days =
+            7 * 24 * 60 * 60 * 1000
+
+        trackAddedAtInMs =
+            track.addedAt
+                |> Date.toTime
+                |> Time.inMilliseconds
+    in
+        trackAddedAtInMs < (referenceTimeInMs - msFor7Days)
 
 
 deleteTrackFromPlaylist :
@@ -205,7 +256,7 @@ deleteTrackFromPlaylist delete userId playlists playlistId trackUri =
                 ]
 
         playlistWithoutTrackDecoder =
-            succeed (playlistsWithoutTrack trackUri playlists)
+            Decode.succeed (playlistsWithoutTrack trackUri playlists)
     in
         delete url body playlistWithoutTrackDecoder
 

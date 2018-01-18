@@ -6,6 +6,8 @@ import Http exposing (Error)
 import Navigation exposing (load)
 import SemanticUI exposing (confirm, loader, loaderBlock)
 import Spotify exposing (AccessToken, get, getRequest, delete)
+import Task exposing (Task)
+import Time exposing (Time)
 import Track exposing (Track, TrackUri, Playlist, PlaylistId)
 import User exposing (User, UserId)
 
@@ -30,6 +32,7 @@ type alias Model =
     , user : User
     , playlists : List Playlist
     , favoriteTracks : List TrackUri
+    , referenceTime : Time
     }
 
 
@@ -47,7 +50,7 @@ type State
 
 init : ( Model, Cmd Msg )
 init =
-    ( emptyModel, Cmd.none )
+    ( emptyModel, setReferenceTimeToNow )
 
 
 emptyModel : Model
@@ -57,6 +60,7 @@ emptyModel =
     , user = User "" "" Nothing
     , playlists = []
     , favoriteTracks = []
+    , referenceTime = 0
     }
 
 
@@ -65,7 +69,8 @@ emptyModel =
 
 
 type Msg
-    = LogIn AccessToken
+    = ReferenceTimeSet Time
+    | LogIn AccessToken
     | UserFetched (Result Error User)
     | FavoriteTracksFetched (Result Error (List TrackUri))
     | PlaylistsFetched (Result Error (List Playlist))
@@ -79,6 +84,9 @@ type Msg
 update : Msg -> Model -> ( Model, Cmd Msg )
 update msg model =
     case msg of
+        ReferenceTimeSet time ->
+            ( { model | referenceTime = time }, Cmd.none )
+
         LogIn accessToken ->
             ( { model | state = Loading, accessToken = accessToken }
             , fetchUser accessToken
@@ -127,7 +135,7 @@ update msg model =
             case Track.selectedPlaylist playlistId model.playlists of
                 Just playlist ->
                     ( { model | state = LoadingTracks }
-                    , fetchPlaylistTracks model.accessToken playlist model.favoriteTracks
+                    , fetchPlaylistTracks model playlist
                     )
 
                 Nothing ->
@@ -161,6 +169,11 @@ update msg model =
             )
 
 
+setReferenceTimeToNow : Cmd Msg
+setReferenceTimeToNow =
+    Task.perform ReferenceTimeSet Time.now
+
+
 fetchUser : AccessToken -> Cmd Msg
 fetchUser accessToken =
     User.fetchData (Spotify.get UserFetched accessToken)
@@ -176,13 +189,14 @@ fetchPlaylists accessToken =
     Track.fetchPlaylists (Spotify.get PlaylistsFetched accessToken)
 
 
-fetchPlaylistTracks : AccessToken -> Playlist -> List TrackUri -> Cmd Msg
-fetchPlaylistTracks accessToken playlist favoriteTracks =
+fetchPlaylistTracks : Model -> Playlist -> Cmd Msg
+fetchPlaylistTracks model playlist =
     Track.fetchPlaylistTracks
         PlaylistTracksFetched
-        (Spotify.getRequest accessToken)
+        (Spotify.getRequest model.accessToken)
+        model.referenceTime
         playlist
-        favoriteTracks
+        model.favoriteTracks
 
 
 deleteTrackFromPlaylist : Model -> PlaylistId -> TrackUri -> Cmd Msg
