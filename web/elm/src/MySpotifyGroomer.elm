@@ -71,7 +71,7 @@ type Msg
     | SelectPlaylist PlaylistId
     | PlaylistTracksFetched (Result Error Playlist)
     | DeleteTrack PlaylistId TrackUri
-    | TrackDeleted (Result Error (List Playlist))
+    | TrackDeleted PlaylistId (Result Error (List Playlist))
 
 
 update : Msg -> Model -> ( Model, Cmd Msg )
@@ -144,12 +144,11 @@ update msg model =
             , deleteTrackFromPlaylist model playlistId trackUri
             )
 
-        TrackDeleted (Ok playlists) ->
-            ( { model | state = PlaylistSelection, playlists = playlists }
-            , Cmd.none
-            )
+        TrackDeleted playlistId (Ok playlists) ->
+            { model | state = PlaylistSelection, playlists = playlists }
+                |> update (SelectPlaylist playlistId)
 
-        TrackDeleted (Err _) ->
+        TrackDeleted _ (Err _) ->
             ( { model | state = Errored "Failed to delete track." }
             , Cmd.none
             )
@@ -182,7 +181,7 @@ fetchPlaylistTracks accessToken playlist favoriteTracks =
 deleteTrackFromPlaylist : Model -> PlaylistId -> TrackUri -> Cmd Msg
 deleteTrackFromPlaylist model playlistId trackUri =
     Track.deleteTrackFromPlaylist
-        (Spotify.delete TrackDeleted model.accessToken)
+        (Spotify.delete (TrackDeleted playlistId) model.accessToken)
         model.user.id
         model.playlists
         playlistId

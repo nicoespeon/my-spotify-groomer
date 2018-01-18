@@ -13,7 +13,7 @@ module Track
         , viewPlaylistTracks
         )
 
-import Html exposing (Html, text, form, div, label, option, select, h2, i, p)
+import Html exposing (Html, text, form, div, label, option, select, h2, i, p, strong)
 import Html.Attributes exposing (class, value, disabled, selected)
 import Html.Events exposing (onInput)
 import Http exposing (Error, Request)
@@ -243,11 +243,12 @@ viewPlaylistTracks onDeleteButtonMsg playlist =
             [ i [ class "music icon" ] [], text playlist.name ]
         , p
             []
-            [ text
-                ("Here are the "
-                    ++ (playlist.tracks |> List.length |> toString)
-                    ++ " songs you don't listen much in this playlist:"
-                )
+            [ text "Here are the "
+            , strong []
+                [ text
+                    ((playlist.tracks |> List.length |> toString) ++ " songs ")
+                ]
+            , text "you don't listen much in this playlist:"
             ]
         , div
             [ class "ui divided relaxed list" ]
