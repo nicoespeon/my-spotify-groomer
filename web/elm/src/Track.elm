@@ -109,9 +109,33 @@ trackUrisDecoder =
         (Decode.list (at [ "uri" ] string))
 
 
-fetchFavoriteTracks : (String -> Decoder (List TrackUri) -> Cmd a) -> Cmd a
-fetchFavoriteTracks fetch =
-    fetch "/me/top/tracks?time_range=short_term&limit=100" trackUrisDecoder
+fetchFavoriteTracks :
+    (Result Error (List TrackUri) -> a)
+    -> (String -> Decoder (List TrackUri) -> Request (List TrackUri))
+    -> Cmd a
+fetchFavoriteTracks msg fetch =
+    let
+        -- Spotify limits number of top tracks that can be fetched to 50.
+        -- But we can hack a bit and retrieve up to 99 using 49 as the offset.
+        -- Offset of 50+ returns no track.
+        -- short_term = last 4 weeks (recent listenings)
+        fetchShortTermFirst50TopTracks =
+            fetch "/me/top/tracks?time_range=short_term&offset=0&limit=50" trackUrisDecoder
+
+        fetchShortTerm49To99TopTracks =
+            fetch "/me/top/tracks?time_range=short_term&offset=49&limit=50" trackUrisDecoder
+    in
+        Task.attempt
+            msg
+            (getTrackUris fetchShortTermFirst50TopTracks []
+                |> Task.andThen (getTrackUris fetchShortTerm49To99TopTracks)
+            )
+
+
+getTrackUris : Request (List TrackUri) -> List TrackUri -> Task Error (List TrackUri)
+getTrackUris fetchTrackUris trackUris =
+    Http.toTask fetchTrackUris
+        |> Task.andThen (Task.succeed << List.append trackUris)
 
 
 tracksDecoder : Decoder (List Track)

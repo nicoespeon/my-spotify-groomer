@@ -181,7 +181,9 @@ fetchUser accessToken =
 
 fetchFavoriteTracks : AccessToken -> Cmd Msg
 fetchFavoriteTracks accessToken =
-    Track.fetchFavoriteTracks (Spotify.get FavoriteTracksFetched accessToken)
+    Track.fetchFavoriteTracks
+        FavoriteTracksFetched
+        (Spotify.getRequest accessToken)
 
 
 fetchPlaylists : AccessToken -> Cmd Msg
