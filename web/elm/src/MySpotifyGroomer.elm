@@ -71,7 +71,7 @@ emptyModel =
 type Msg
     = ReferenceTimeSet Time
     | LogIn AccessToken
-    | UserFetched (Result Error User)
+    | UserMsg User.Msg
     | FavoriteTracksFetched (Result Error (List TrackUri))
     | PlaylistsFetched (Result Error (List Playlist))
     | SelectPlaylist PlaylistId
@@ -92,18 +92,24 @@ update msg model =
             , fetchUser accessToken
             )
 
-        UserFetched (Ok user) ->
-            ( { model
-                | state = LoadingPlaylists "Fetching your favorite tracks…"
-                , user = user
-              }
-            , fetchFavoriteTracks model.accessToken
-            )
+        UserMsg userMsg ->
+            let
+                ( newUser, msgFromUser ) =
+                    User.update userMsg model.user
 
-        UserFetched (Err _) ->
-            ( { model | state = Errored "Failed to fetch user data." }
-            , load "/login"
-            )
+                ( newState, newCmd ) =
+                    case msgFromUser of
+                        User.UserSet ->
+                            ( LoadingPlaylists "Fetching your favorite tracks…"
+                            , fetchFavoriteTracks model.accessToken
+                            )
+
+                        User.FetchFailed ->
+                            ( Errored "Failed to fetch user data."
+                            , load "/login"
+                            )
+            in
+                ( { model | state = newState, user = newUser }, newCmd )
 
         FavoriteTracksFetched (Ok trackUris) ->
             ( { model
@@ -176,7 +182,8 @@ setReferenceTimeToNow =
 
 fetchUser : AccessToken -> Cmd Msg
 fetchUser accessToken =
-    User.fetchData (Spotify.get UserFetched accessToken)
+    User.fetchData (Spotify.getRequest accessToken)
+        |> Cmd.map UserMsg
 
 
 fetchFavoriteTracks : AccessToken -> Cmd Msg
