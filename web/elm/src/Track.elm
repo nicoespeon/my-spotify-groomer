@@ -1,18 +1,4 @@
-module Track
-    exposing
-        ( Track
-        , TrackUri
-        , Playlist
-        , PlaylistId
-        , deleteTrackFromPlaylist
-        , fetchFavoriteTracks
-        , fetchPlaylists
-        , fetchPlaylistTracks
-        , selectedPlaylist
-        , viewConfirmDeleteTrack
-        , viewPlaylistSelectForm
-        , viewPlaylistTracks
-        )
+module Track exposing (Track, Msg, Model, emptyModel, update, fetchFavoriteTracks, view)
 
 import Date exposing (Date)
 import Html exposing (Html, text, form, div, label, option, select, h2, i, p, strong)
@@ -21,13 +7,30 @@ import Html.Events exposing (onInput)
 import Http exposing (Error, Request)
 import Json.Decode as Decode exposing (Decoder, at, string, bool)
 import Json.Encode as Encode
-import SemanticUI exposing (disabledDeleteButton, deleteButton)
+import SemanticUI exposing (confirm, disabledDeleteButton, deleteButton, loaderBlock)
 import Task exposing (Task)
 import Time exposing (Time)
 import User exposing (UserId)
 
 
 -- MODEL
+
+
+type alias Model =
+    { state : State
+    , playlists : List Playlist
+    , favoriteTrackUris : List TrackUri
+    }
+
+
+type State
+    = LoadingPlaylists
+    | PlaylistSelection
+    | LoadingTracks
+    | PlaylistTracks Playlist
+    | AskingToDeleteTrack Playlist Track
+    | DeletingTrack
+    | Errored String
 
 
 type alias Playlist =
@@ -61,8 +64,116 @@ type alias PaginatedTracks =
     }
 
 
+emptyModel : Model
+emptyModel =
+    { state = LoadingPlaylists
+    , playlists = []
+    , favoriteTrackUris = []
+    }
+
+
 
 -- UPDATE
+
+
+type Msg
+    = FavoriteTracksFetched (Result Error (List TrackUri))
+    | PlaylistsFetched (Result Error (List Playlist))
+    | SelectPlaylist PlaylistId
+    | PlaylistTracksFetched (Result Error Playlist)
+    | AskToDeleteTrack Playlist Track
+    | DeleteTrack PlaylistId TrackUri
+    | TrackDeleted PlaylistId (Result Error (List Playlist))
+
+
+update :
+    (String -> Decoder (List Playlist) -> Request (List Playlist))
+    -> (String -> Decoder PaginatedTracks -> Request PaginatedTracks)
+    -> (String -> Encode.Value -> Decoder (List Playlist) -> Request (List Playlist))
+    -> Time
+    -> UserId
+    -> Msg
+    -> Model
+    -> ( Model, Cmd Msg )
+update fetch fetchPaginatedTracks delete referenceTime userId msg model =
+    case msg of
+        FavoriteTracksFetched (Ok trackUris) ->
+            ( { model | favoriteTrackUris = trackUris }, fetchPlaylists fetch )
+
+        FavoriteTracksFetched (Err _) ->
+            ( { model | state = Errored "Failed to fetch user top tracks." }
+            , Cmd.none
+            )
+
+        PlaylistsFetched (Ok playlists) ->
+            ( { model
+                | state = PlaylistSelection
+                , playlists = playlistsOwnedByUser userId playlists
+              }
+            , Cmd.none
+            )
+
+        PlaylistsFetched (Err _) ->
+            ( { model | state = Errored "Failed to fetch user playlists." }
+            , Cmd.none
+            )
+
+        SelectPlaylist playlistId ->
+            let
+                cmd =
+                    case selectedPlaylist playlistId model.playlists of
+                        Just playlist ->
+                            fetchPlaylistTracks
+                                fetchPaginatedTracks
+                                referenceTime
+                                playlist
+                                model.favoriteTrackUris
+
+                        Nothing ->
+                            Cmd.none
+            in
+                ( { model | state = LoadingTracks }, cmd )
+
+        PlaylistTracksFetched (Ok playlist) ->
+            ( { model | state = PlaylistTracks playlist }, Cmd.none )
+
+        PlaylistTracksFetched (Err _) ->
+            ( { model | state = Errored "Failed to fetch playlist tracks." }
+            , Cmd.none
+            )
+
+        AskToDeleteTrack playlist track ->
+            ( { model | state = AskingToDeleteTrack playlist track }
+            , Cmd.none
+            )
+
+        DeleteTrack playlistId trackUri ->
+            ( { model | state = DeletingTrack }
+            , deleteTrackFromPlaylist
+                delete
+                userId
+                model.playlists
+                playlistId
+                trackUri
+            )
+
+        TrackDeleted playlistId (Ok playlists) ->
+            { model | playlists = playlists }
+                |> update
+                    fetch
+                    fetchPaginatedTracks
+                    delete
+                    referenceTime
+                    userId
+                    (SelectPlaylist playlistId)
+
+        TrackDeleted _ (Err _) ->
+            ( { model | state = Errored "Failed to delete track." }, Cmd.none )
+
+
+playlistsOwnedByUser : UserId -> List Playlist -> List Playlist
+playlistsOwnedByUser userId =
+    List.filter (\p -> p.ownerId == userId)
 
 
 selectedPlaylist : PlaylistId -> List Playlist -> Maybe Playlist
@@ -98,9 +209,11 @@ playlistsDecoder =
         )
 
 
-fetchPlaylists : (String -> Decoder (List Playlist) -> Cmd a) -> Cmd a
+fetchPlaylists : (String -> Decoder (List Playlist) -> Request (List Playlist)) -> Cmd Msg
 fetchPlaylists fetch =
-    fetch "/me/playlists?fields=items(id,owner.id,name,tracks.href)&limit=50" playlistsDecoder
+    Http.send
+        PlaylistsFetched
+        (fetch "/me/playlists?fields=items(id,owner.id,name,tracks.href)&limit=50" playlistsDecoder)
 
 
 trackUrisDecoder : Decoder (List TrackUri)
@@ -110,10 +223,9 @@ trackUrisDecoder =
 
 
 fetchFavoriteTracks :
-    (Result Error (List TrackUri) -> a)
-    -> (String -> Decoder (List TrackUri) -> Request (List TrackUri))
-    -> Cmd a
-fetchFavoriteTracks msg fetch =
+    (String -> Decoder (List TrackUri) -> Request (List TrackUri))
+    -> Cmd Msg
+fetchFavoriteTracks fetch =
     let
         -- Spotify limits number of top tracks that can be fetched to 50.
         -- But we can hack a bit and retrieve up to 99 using 49 as the offset.
@@ -126,7 +238,7 @@ fetchFavoriteTracks msg fetch =
             fetch "/me/top/tracks?time_range=short_term&offset=49&limit=50" trackUrisDecoder
     in
         Task.attempt
-            msg
+            FavoriteTracksFetched
             (getTrackUris fetchShortTermFirst50TopTracks []
                 |> Task.andThen (getTrackUris fetchShortTerm49To99TopTracks)
             )
@@ -173,19 +285,18 @@ paginatedTracksDecoder =
 
 
 fetchPlaylistTracks :
-    (Result Error Playlist -> a)
-    -> (String -> Decoder PaginatedTracks -> Request PaginatedTracks)
+    (String -> Decoder PaginatedTracks -> Request PaginatedTracks)
     -> Time
     -> Playlist
     -> List TrackUri
-    -> Cmd a
-fetchPlaylistTracks msg fetch referenceTime playlist favoriteTrackUris =
+    -> Cmd Msg
+fetchPlaylistTracks fetch referenceTime playlist favoriteTrackUris =
     let
         url =
             playlist.tracksUrl ++ "?fields=items(track.name,track.uri,is_local,added_at),next"
     in
         Task.attempt
-            msg
+            PlaylistTracksFetched
             (fetchPlaylistTracksWithUrl fetch referenceTime favoriteTrackUris url playlist)
 
 
@@ -258,12 +369,12 @@ hasBeenCreated7DaysBefore referenceTime track =
 
 
 deleteTrackFromPlaylist :
-    (String -> Encode.Value -> Decoder (List Playlist) -> Cmd a)
+    (String -> Encode.Value -> Decoder (List Playlist) -> Request (List Playlist))
     -> UserId
     -> List Playlist
     -> PlaylistId
     -> TrackUri
-    -> Cmd a
+    -> Cmd Msg
 deleteTrackFromPlaylist delete userId playlists playlistId trackUri =
     let
         url =
@@ -282,15 +393,48 @@ deleteTrackFromPlaylist delete userId playlists playlistId trackUri =
         playlistWithoutTrackDecoder =
             Decode.succeed (playlistsWithoutTrack trackUri playlists)
     in
-        delete url body playlistWithoutTrackDecoder
+        Http.send
+            (TrackDeleted playlistId)
+            (delete url body playlistWithoutTrackDecoder)
 
 
 
 -- VIEW
 
 
-viewPlaylistSelectForm : (String -> a) -> List Playlist -> Html a
-viewPlaylistSelectForm onInputMsg playlists =
+view : Model -> Html Msg
+view model =
+    case model.state of
+        LoadingPlaylists ->
+            loaderBlock "Fetching your playlists…"
+
+        PlaylistSelection ->
+            viewPlaylistSelectForm model.playlists
+
+        LoadingTracks ->
+            div []
+                [ viewPlaylistSelectForm model.playlists
+                , loaderBlock "Fetching playlist tracks…"
+                ]
+
+        PlaylistTracks selectedPlaylist ->
+            div []
+                [ viewPlaylistSelectForm model.playlists
+                , viewPlaylistTracks selectedPlaylist
+                ]
+
+        AskingToDeleteTrack playlist track ->
+            viewConfirmDeleteTrack playlist track
+
+        DeletingTrack ->
+            loaderBlock "Deleting the track…"
+
+        Errored message ->
+            text ("An error occurred: " ++ message)
+
+
+viewPlaylistSelectForm : List Playlist -> Html Msg
+viewPlaylistSelectForm playlists =
     let
         placeholderOption =
             option [ disabled True, selected True ] [ text "🎧 Select a playlist" ]
@@ -306,13 +450,13 @@ viewPlaylistSelectForm onInputMsg playlists =
             [ div
                 [ class "field" ]
                 [ label [] [ text "Which playlist would you like to groom?" ]
-                , select [ class "ui fluid dropdown", onInput onInputMsg ] playlistOptions
+                , select [ class "ui fluid dropdown", onInput SelectPlaylist ] playlistOptions
                 ]
             ]
 
 
-viewPlaylistTracks : (Playlist -> Track -> a) -> Playlist -> Html a
-viewPlaylistTracks onDeleteButtonMsg playlist =
+viewPlaylistTracks : Playlist -> Html Msg
+viewPlaylistTracks playlist =
     div []
         [ h2
             [ class "ui section horizontal divider header" ]
@@ -328,7 +472,7 @@ viewPlaylistTracks onDeleteButtonMsg playlist =
             ]
         , div
             [ class "ui divided relaxed list" ]
-            (List.map (viewTrack (onDeleteButtonMsg playlist)) playlist.tracks)
+            (List.map (viewTrack (AskToDeleteTrack playlist)) playlist.tracks)
         ]
 
 
@@ -352,8 +496,8 @@ viewDeleteTrackButton onDeleteButtonMsg track =
         deleteButton (onDeleteButtonMsg track)
 
 
-viewConfirmDeleteTrack : (Html a -> String -> String -> Html a) -> Playlist -> Track -> Html a
-viewConfirmDeleteTrack confirm playlist track =
+viewConfirmDeleteTrack : Playlist -> Track -> Html Msg
+viewConfirmDeleteTrack playlist track =
     let
         message =
             div []
@@ -365,6 +509,8 @@ viewConfirmDeleteTrack confirm playlist track =
                 ]
     in
         confirm
+            (DeleteTrack playlist.id track.uri)
+            (SelectPlaylist playlist.id)
             message
             "Yes, delete it"
             "No, keep the track"

@@ -1,4 +1,4 @@
-module Spotify exposing (AccessToken, get, getRequest, delete)
+module Spotify exposing (AccessToken, get, delete)
 
 import Http exposing (Header, Request, Error, header, emptyBody, jsonBody, expectJson)
 import Json.Decode as Decode exposing (Decoder)
@@ -31,8 +31,8 @@ toSpotifyUrl url =
         spotifyBaseUrl ++ url
 
 
-getRequest : AccessToken -> Url -> Decoder a -> Request a
-getRequest accessToken url decoder =
+get : AccessToken -> Url -> Decoder a -> Request a
+get accessToken url decoder =
     Http.request
         { method = "GET"
         , headers = [ authorizationHeader accessToken ]
@@ -44,23 +44,14 @@ getRequest accessToken url decoder =
         }
 
 
-get : (Result Error a -> b) -> AccessToken -> Url -> Decoder a -> Cmd b
-get msg accessToken url decoder =
-    Http.send msg (getRequest accessToken url decoder)
-
-
-delete : (Result Error a -> b) -> AccessToken -> Url -> Value -> Decoder a -> Cmd b
-delete msg accessToken url body decoder =
-    let
-        request =
-            Http.request
-                { method = "DELETE"
-                , headers = [ authorizationHeader accessToken ]
-                , url = toSpotifyUrl url
-                , body = jsonBody body
-                , expect = expectJson decoder
-                , timeout = Nothing
-                , withCredentials = False
-                }
-    in
-        Http.send msg request
+delete : AccessToken -> Url -> Value -> Decoder a -> Request a
+delete accessToken url body decoder =
+    Http.request
+        { method = "DELETE"
+        , headers = [ authorizationHeader accessToken ]
+        , url = toSpotifyUrl url
+        , body = jsonBody body
+        , expect = expectJson decoder
+        , timeout = Nothing
+        , withCredentials = False
+        }

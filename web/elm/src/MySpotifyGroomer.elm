@@ -2,13 +2,12 @@ port module MySpotifyGroomer exposing (main)
 
 import Html exposing (Html, program, h1, div, text, nav)
 import Html.Attributes exposing (class)
-import Http exposing (Error)
 import Navigation exposing (load)
 import SemanticUI exposing (confirm, loader, loaderBlock)
-import Spotify exposing (AccessToken, get, getRequest, delete)
+import Spotify exposing (AccessToken, get, delete)
 import Task exposing (Task)
 import Time exposing (Time)
-import Track exposing (Track, TrackUri, Playlist, PlaylistId)
+import Track exposing (Track)
 import User exposing (User, UserId)
 
 
@@ -30,8 +29,7 @@ type alias Model =
     { accessToken : AccessToken
     , state : State
     , user : User
-    , playlists : List Playlist
-    , favoriteTracks : List TrackUri
+    , track : Track.Model
     , referenceTime : Time
     }
 
@@ -39,13 +37,8 @@ type alias Model =
 type State
     = Blank
     | Loading
+    | Loaded
     | Errored String
-    | AskingToDeleteTrack Playlist Track
-    | LoadingPlaylists String
-    | PlaylistSelection
-    | LoadingTracks
-    | PlaylistTracks Playlist
-    | DeletingTrack
 
 
 init : ( Model, Cmd Msg )
@@ -58,8 +51,7 @@ emptyModel =
     { accessToken = ""
     , state = Blank
     , user = User "" "" Nothing
-    , playlists = []
-    , favoriteTracks = []
+    , track = Track.emptyModel
     , referenceTime = 0
     }
 
@@ -72,13 +64,7 @@ type Msg
     = ReferenceTimeSet Time
     | LogIn AccessToken
     | UserMsg User.Msg
-    | FavoriteTracksFetched (Result Error (List TrackUri))
-    | PlaylistsFetched (Result Error (List Playlist))
-    | SelectPlaylist PlaylistId
-    | PlaylistTracksFetched (Result Error Playlist)
-    | AskToDeleteTrack Playlist Track
-    | DeleteTrack PlaylistId TrackUri
-    | TrackDeleted PlaylistId (Result Error (List Playlist))
+    | TrackMsg Track.Msg
 
 
 update : Msg -> Model -> ( Model, Cmd Msg )
@@ -100,7 +86,7 @@ update msg model =
                 ( newState, newCmd ) =
                     case msgFromUser of
                         User.UserSet ->
-                            ( LoadingPlaylists "Fetching your favorite tracks…"
+                            ( Loaded
                             , fetchFavoriteTracks model.accessToken
                             )
 
@@ -111,68 +97,21 @@ update msg model =
             in
                 ( { model | state = newState, user = newUser }, newCmd )
 
-        FavoriteTracksFetched (Ok trackUris) ->
-            ( { model
-                | state = LoadingPlaylists "Fetching your playlists…"
-                , favoriteTracks = trackUris
-              }
-            , fetchPlaylists model.accessToken
-            )
-
-        FavoriteTracksFetched (Err _) ->
-            ( { model | state = Errored "Failed to fetch user top tracks." }
-            , Cmd.none
-            )
-
-        PlaylistsFetched (Ok playlists) ->
-            ( { model
-                | state = PlaylistSelection
-                , playlists = playlistsOwnedByUser model.user.id playlists
-              }
-            , Cmd.none
-            )
-
-        PlaylistsFetched (Err _) ->
-            ( { model | state = Errored "Failed to fetch user playlists." }
-            , Cmd.none
-            )
-
-        SelectPlaylist playlistId ->
-            case Track.selectedPlaylist playlistId model.playlists of
-                Just playlist ->
-                    ( { model | state = LoadingTracks }
-                    , fetchPlaylistTracks model playlist
-                    )
-
-                Nothing ->
-                    ( model, Cmd.none )
-
-        PlaylistTracksFetched (Ok playlist) ->
-            ( { model | state = PlaylistTracks playlist }, Cmd.none )
-
-        PlaylistTracksFetched (Err _) ->
-            ( { model | state = Errored "Failed to fetch playlist tracks." }
-            , Cmd.none
-            )
-
-        AskToDeleteTrack playlist track ->
-            ( { model | state = AskingToDeleteTrack playlist track }
-            , Cmd.none
-            )
-
-        DeleteTrack playlistId trackUri ->
-            ( { model | state = DeletingTrack }
-            , deleteTrackFromPlaylist model playlistId trackUri
-            )
-
-        TrackDeleted playlistId (Ok playlists) ->
-            { model | state = PlaylistSelection, playlists = playlists }
-                |> update (SelectPlaylist playlistId)
-
-        TrackDeleted _ (Err _) ->
-            ( { model | state = Errored "Failed to delete track." }
-            , Cmd.none
-            )
+        TrackMsg trackMsg ->
+            let
+                ( newTrack, newTrackMsg ) =
+                    Track.update
+                        (Spotify.get model.accessToken)
+                        (Spotify.get model.accessToken)
+                        (Spotify.delete model.accessToken)
+                        model.referenceTime
+                        model.user.id
+                        trackMsg
+                        model.track
+            in
+                ( { model | state = Loaded, track = newTrack }
+                , Cmd.map TrackMsg newTrackMsg
+                )
 
 
 setReferenceTimeToNow : Cmd Msg
@@ -182,45 +121,14 @@ setReferenceTimeToNow =
 
 fetchUser : AccessToken -> Cmd Msg
 fetchUser accessToken =
-    User.fetchData (Spotify.getRequest accessToken)
+    User.fetchData (Spotify.get accessToken)
         |> Cmd.map UserMsg
 
 
 fetchFavoriteTracks : AccessToken -> Cmd Msg
 fetchFavoriteTracks accessToken =
-    Track.fetchFavoriteTracks
-        FavoriteTracksFetched
-        (Spotify.getRequest accessToken)
-
-
-fetchPlaylists : AccessToken -> Cmd Msg
-fetchPlaylists accessToken =
-    Track.fetchPlaylists (Spotify.get PlaylistsFetched accessToken)
-
-
-fetchPlaylistTracks : Model -> Playlist -> Cmd Msg
-fetchPlaylistTracks model playlist =
-    Track.fetchPlaylistTracks
-        PlaylistTracksFetched
-        (Spotify.getRequest model.accessToken)
-        model.referenceTime
-        playlist
-        model.favoriteTracks
-
-
-deleteTrackFromPlaylist : Model -> PlaylistId -> TrackUri -> Cmd Msg
-deleteTrackFromPlaylist model playlistId trackUri =
-    Track.deleteTrackFromPlaylist
-        (Spotify.delete (TrackDeleted playlistId) model.accessToken)
-        model.user.id
-        model.playlists
-        playlistId
-        trackUri
-
-
-playlistsOwnedByUser : UserId -> List Playlist -> List Playlist
-playlistsOwnedByUser userId =
-    List.filter (\p -> p.ownerId == userId)
+    Track.fetchFavoriteTracks (Spotify.get accessToken)
+        |> Cmd.map TrackMsg
 
 
 
@@ -236,58 +144,17 @@ view model =
         Loading ->
             loader "Fetching data from Spotify…"
 
-        LoadingPlaylists message ->
-            div []
-                [ mainNav model.user
-                , mainContainer [ pageTitle, loaderBlock message ]
-                ]
-
-        PlaylistSelection ->
+        Loaded ->
             div []
                 [ mainNav model.user
                 , mainContainer
                     [ pageTitle
-                    , viewPlaylistSelectForm model.playlists
+                    , Track.view model.track |> Html.map TrackMsg
                     ]
-                ]
-
-        LoadingTracks ->
-            div []
-                [ mainNav model.user
-                , mainContainer
-                    [ pageTitle
-                    , viewPlaylistSelectForm model.playlists
-                    , loaderBlock "Fetching playlist tracks…"
-                    ]
-                ]
-
-        PlaylistTracks playlist ->
-            div []
-                [ mainNav model.user
-                , mainContainer
-                    [ pageTitle
-                    , viewPlaylistSelectForm model.playlists
-                    , Track.viewPlaylistTracks AskToDeleteTrack playlist
-                    ]
-                ]
-
-        DeletingTrack ->
-            div []
-                [ mainNav model.user
-                , mainContainer [ pageTitle, loaderBlock "Deleting the track…" ]
                 ]
 
         Errored message ->
             text ("An error occurred: " ++ message)
-
-        AskingToDeleteTrack playlist track ->
-            div []
-                [ mainNav model.user
-                , mainContainer
-                    [ pageTitle
-                    , viewConfirmDeleteTrack model playlist track
-                    ]
-                ]
 
 
 mainContainer : List (Html Msg) -> Html Msg
@@ -311,22 +178,6 @@ mainNav user =
                 [ User.view user ]
             ]
         ]
-
-
-viewPlaylistSelectForm : List Playlist -> Html Msg
-viewPlaylistSelectForm =
-    Track.viewPlaylistSelectForm SelectPlaylist
-
-
-viewConfirmDeleteTrack : Model -> Playlist -> Track -> Html Msg
-viewConfirmDeleteTrack model playlist track =
-    Track.viewConfirmDeleteTrack
-        (confirm
-            (DeleteTrack playlist.id track.uri)
-            (SelectPlaylist playlist.id)
-        )
-        playlist
-        track
 
 
 
