@@ -4,7 +4,7 @@
   "repository": {},
   "license": "MIT",
   "scripts": {
-    "preinstall": "mix deps.get",
+    "preinstall": "mix deps.get; cd semantic; gulp build",
     "start": "mix phoenix.server",
     "test:back": "mix test",
     "test:back:watch": "mix test.watch",
