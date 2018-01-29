@@ -28,7 +28,7 @@ type State
     = LoadingPlaylists
     | PlaylistSelection
     | LoadingTracks
-    | PlaylistTracks
+    | PlaylistTracks Time
     | AskingToDeleteTracks Playlist
     | DeletingTracks
     | Errored String
@@ -38,6 +38,7 @@ type alias Playlist =
     { id : PlaylistId
     , ownerId : UserId
     , name : String
+    , snapshotId : SnapshotId
     , tracksUrl : String
     , tracks : List Track
     }
@@ -47,12 +48,17 @@ type alias PlaylistId =
     String
 
 
+type alias SnapshotId =
+    String
+
+
 type alias Track =
     { uri : TrackUri
     , name : String
     , isLocal : Bool
     , addedAt : Date
     , shouldBeDeleted : Bool
+    , position : Int
     }
 
 
@@ -87,13 +93,13 @@ type Msg
     | ToggleTrackDeletion Track
     | AskToDeleteTracks
     | DeleteTracks Playlist
-    | TracksDeleted (Result Error PlaylistId)
+    | TracksDeleted (Result Error Playlist)
 
 
 update :
     (String -> Decoder (List Playlist) -> Request (List Playlist))
     -> (String -> Decoder PaginatedTracks -> Request PaginatedTracks)
-    -> (String -> Encode.Value -> Decoder PlaylistId -> Request PlaylistId)
+    -> (String -> Encode.Value -> Decoder SnapshotId -> Request SnapshotId)
     -> Time
     -> UserId
     -> Msg
@@ -129,9 +135,7 @@ update fetch fetchPaginatedTracks delete referenceTime userId msg model =
                         Just playlist ->
                             fetchPlaylistTracks
                                 fetchPaginatedTracks
-                                referenceTime
-                                playlist
-                                model.favoriteTrackUris
+                                { playlist | tracks = [] }
 
                         Nothing ->
                             Cmd.none
@@ -140,7 +144,7 @@ update fetch fetchPaginatedTracks delete referenceTime userId msg model =
 
         PlaylistTracksFetched (Ok playlist) ->
             ( { model
-                | state = PlaylistTracks
+                | state = PlaylistTracks referenceTime
                 , selectedPlaylist = Just playlist
               }
             , Cmd.none
@@ -166,18 +170,18 @@ update fetch fetchPaginatedTracks delete referenceTime userId msg model =
             , deleteTracksFromPlaylist delete userId playlist
             )
 
-        TracksDeleted (Ok playlistId) ->
-            update
-                fetch
-                fetchPaginatedTracks
-                delete
-                referenceTime
-                userId
-                (SelectPlaylist playlistId)
-                model
+        TracksDeleted (Ok playlist) ->
+            updatePlaylists model playlist
+                |> update
+                    fetch
+                    fetchPaginatedTracks
+                    delete
+                    referenceTime
+                    userId
+                    (SelectPlaylist playlist.id)
 
         TracksDeleted (Err _) ->
-            ( { model | state = Errored "Failed to delete track." }, Cmd.none )
+            ( { model | state = Errored "Failed to delete tracks." }, Cmd.none )
 
         ToggleTrackDeletion track ->
             let
@@ -244,25 +248,46 @@ tracksToBeDeleted =
     List.filter .shouldBeDeleted
 
 
+updatePlaylists : Model -> Playlist -> Model
+updatePlaylists model newPlaylist =
+    { model
+        | playlists =
+            List.map
+                (\playlist ->
+                    if playlist.id == newPlaylist.id then
+                        newPlaylist
+                    else
+                        playlist
+                )
+                model.playlists
+    }
+
+
 playlistsDecoder : Decoder (List Playlist)
 playlistsDecoder =
     at [ "items" ]
         (Decode.list
-            (Decode.map5 Playlist
+            (Decode.map6 Playlist
                 (at [ "id" ] string)
                 (at [ "owner", "id" ] string)
                 (at [ "name" ] string)
+                snapshotIdDecoder
                 (at [ "tracks", "href" ] string)
                 (Decode.succeed [])
             )
         )
 
 
+snapshotIdDecoder : Decoder SnapshotId
+snapshotIdDecoder =
+    at [ "snapshot_id" ] string
+
+
 fetchPlaylists : (String -> Decoder (List Playlist) -> Request (List Playlist)) -> Cmd Msg
 fetchPlaylists fetch =
     Http.send
         PlaylistsFetched
-        (fetch "/me/playlists?fields=items(id,owner.id,name,tracks.href)&limit=50" playlistsDecoder)
+        (fetch "/me/playlists?fields=items(id,owner.id,name,tracks.href,snapshot_id)&limit=50" playlistsDecoder)
 
 
 trackUrisDecoder : Decoder (List TrackUri)
@@ -303,12 +328,15 @@ tracksDecoder : Decoder (List Track)
 tracksDecoder =
     at [ "items" ]
         (Decode.list
-            (Decode.map5 Track
+            (Decode.map6 Track
                 (at [ "track", "uri" ] string)
                 (at [ "track", "name" ] string)
                 (at [ "is_local" ] bool)
                 (at [ "added_at" ] decodeDate)
+                -- We don't want track to be selected by default
                 (Decode.succeed False)
+                -- Position in the playlist is computed when we append the track
+                (Decode.succeed 0)
             )
         )
 
@@ -336,61 +364,48 @@ paginatedTracksDecoder =
 
 fetchPlaylistTracks :
     (String -> Decoder PaginatedTracks -> Request PaginatedTracks)
-    -> Time
     -> Playlist
-    -> List TrackUri
     -> Cmd Msg
-fetchPlaylistTracks fetch referenceTime playlist favoriteTrackUris =
+fetchPlaylistTracks fetch playlist =
     let
         url =
             playlist.tracksUrl ++ "?fields=items(track.name,track.uri,is_local,added_at),next"
     in
         Task.attempt
             PlaylistTracksFetched
-            (fetchPlaylistTracksWithUrl fetch referenceTime favoriteTrackUris url playlist)
+            (fetchPlaylistTracksWithUrl fetch url playlist)
 
 
 fetchPlaylistTracksWithUrl :
     (String -> Decoder PaginatedTracks -> Request PaginatedTracks)
-    -> Time
-    -> List TrackUri
     -> String
     -> Playlist
     -> Task Error Playlist
-fetchPlaylistTracksWithUrl fetch referenceTime favoriteTrackUris url playlist =
+fetchPlaylistTracksWithUrl fetch url playlist =
     Http.toTask (fetch url paginatedTracksDecoder)
         |> Task.andThen
             (\pt ->
                 let
-                    addTracks =
-                        addTracksToPlaylist
-                            referenceTime
-                            playlist
-                            favoriteTrackUris
-
                     fetchAgain =
-                        fetchPlaylistTracksWithUrl
-                            fetch
-                            referenceTime
-                            favoriteTrackUris
+                        fetchPlaylistTracksWithUrl fetch
                 in
                     case pt.next of
                         Just nextUrl ->
-                            addTracks pt.tracks
+                            addTracksToPlaylist playlist pt.tracks
                                 |> Task.andThen (fetchAgain nextUrl)
 
                         Nothing ->
-                            addTracks pt.tracks
+                            addTracksToPlaylist playlist pt.tracks
             )
 
 
-addTracksToPlaylist : Time -> Playlist -> List TrackUri -> List Track -> Task Error Playlist
-addTracksToPlaylist referenceTime playlist favoriteTrackUris tracks =
+addTracksToPlaylist : Playlist -> List Track -> Task Error Playlist
+addTracksToPlaylist playlist tracks =
     let
         newTracks =
-            playlist.tracks
-                |> List.append tracks
-                |> List.filter (isTrackNotListenedAnymore referenceTime favoriteTrackUris)
+            tracks
+                |> List.append playlist.tracks
+                |> List.indexedMap (\i track -> { track | position = i })
     in
         Task.succeed { playlist | tracks = newTracks }
 
@@ -398,55 +413,89 @@ addTracksToPlaylist referenceTime playlist favoriteTrackUris tracks =
 isTrackNotListenedAnymore : Time -> List TrackUri -> Track -> Bool
 isTrackNotListenedAnymore referenceTime favoriteTrackUris track =
     not (List.member track.uri favoriteTrackUris)
-        && hasBeenCreated7DaysBefore referenceTime track
+        && hasBeenAddedNDaysBefore 14 referenceTime track
 
 
-hasBeenCreated7DaysBefore : Time -> Track -> Bool
-hasBeenCreated7DaysBefore referenceTime track =
+hasBeenAddedNDaysBefore : Float -> Time -> Track -> Bool
+hasBeenAddedNDaysBefore days referenceTime track =
     let
         referenceTimeInMs =
             Time.inMilliseconds referenceTime
 
-        msFor7Days =
-            7 * 24 * 60 * 60 * 1000
+        msForNDays =
+            days * 24 * 60 * 60 * 1000
 
         trackAddedAtInMs =
             track.addedAt
                 |> Date.toTime
                 |> Time.inMilliseconds
     in
-        trackAddedAtInMs < (referenceTimeInMs - msFor7Days)
+        trackAddedAtInMs < (referenceTimeInMs - msForNDays)
 
 
 deleteTracksFromPlaylist :
-    (String -> Encode.Value -> Decoder PlaylistId -> Request PlaylistId)
+    (String -> Encode.Value -> Decoder SnapshotId -> Request SnapshotId)
     -> UserId
     -> Playlist
     -> Cmd Msg
-deleteTracksFromPlaylist delete userId playlist =
+deleteTracksFromPlaylist deleteRequest userId playlist =
     let
-        tracksToDelete =
-            tracksToBeDeleted playlist.tracks
-
         url =
             "/users/" ++ userId ++ "/playlists/" ++ playlist.id ++ "/tracks"
 
-        body =
-            Encode.object
-                [ ( "tracks"
-                  , tracksToDelete
-                        |> List.map
-                            (\track ->
-                                Encode.object
-                                    [ ( "uri", Encode.string track.uri ) ]
-                            )
-                        |> Encode.list
-                  )
-                ]
+        localTracksRequestBody =
+            playlist.tracks
+                |> List.filter .isLocal
+                |> tracksToBeDeleted
+                |> localTracksDeleteRequestBody playlist.snapshotId
+
+        notLocalTracksRequestBody =
+            playlist.tracks
+                |> List.filter (not << .isLocal)
+                |> tracksToBeDeleted
+                |> notLocalTracksDeleteRequestBody
+
+        delete body =
+            Http.toTask
+                (deleteRequest url body snapshotIdDecoder)
     in
-        Http.send
-            TracksDeleted
-            (delete url body (Decode.succeed playlist.id))
+        Task.attempt TracksDeleted <|
+            Task.map2
+                (\_ newSnapshotId -> { playlist | snapshotId = newSnapshotId })
+                (delete localTracksRequestBody)
+                (delete notLocalTracksRequestBody)
+
+
+notLocalTracksDeleteRequestBody : List Track -> Encode.Value
+notLocalTracksDeleteRequestBody tracks =
+    Encode.object
+        [ ( "tracks"
+          , tracks
+                |> List.map
+                    (\track ->
+                        Encode.object
+                            [ ( "uri", Encode.string track.uri ) ]
+                    )
+                |> Encode.list
+          )
+        ]
+
+
+localTracksDeleteRequestBody : SnapshotId -> List Track -> Encode.Value
+localTracksDeleteRequestBody snapshotId tracks =
+    if List.length tracks > 0 then
+        Encode.object
+            [ ( "positions"
+              , tracks
+                    |> List.map .position
+                    |> List.map Encode.int
+                    |> Encode.list
+              )
+            , ( "snapshot_id", Encode.string snapshotId )
+            ]
+    else
+        Encode.object
+            [ ( "tracks", Encode.list [] ) ]
 
 
 
@@ -468,12 +517,15 @@ view model =
                 , loaderBlock "Fetching playlist tracks…"
                 ]
 
-        PlaylistTracks ->
+        PlaylistTracks referenceTime ->
             case model.selectedPlaylist of
                 Just playlist ->
                     div []
                         [ viewPlaylistSelectForm model.playlists
-                        , viewPlaylistTracks playlist
+                        , viewPlaylistNotListenedTracks
+                            playlist
+                            referenceTime
+                            model.favoriteTrackUris
                         ]
 
                 Nothing ->
@@ -513,11 +565,15 @@ viewPlaylistSelectForm playlists =
             ]
 
 
-viewPlaylistTracks : Playlist -> Html Msg
-viewPlaylistTracks playlist =
+viewPlaylistNotListenedTracks : Playlist -> Time -> List TrackUri -> Html Msg
+viewPlaylistNotListenedTracks playlist referenceTime favoriteTrackUris =
     let
+        tracks =
+            playlist.tracks
+                |> List.filter (isTrackNotListenedAnymore referenceTime favoriteTrackUris)
+
         nbTracks =
-            playlist.tracks |> List.length |> toString
+            tracks |> List.length |> toString
     in
         div []
             [ h2
@@ -529,10 +585,10 @@ viewPlaylistTracks playlist =
                 , strong [] [ text (nbTracks ++ " songs ") ]
                 , text "you don't listen much in this playlist:"
                 ]
-            , playlistDeleteButton playlist.tracks
+            , playlistDeleteButton tracks
             , div
                 [ class "ui relaxed list" ]
-                (List.map viewTrack playlist.tracks)
+                (List.map viewTrack tracks)
             ]
 
 
@@ -559,39 +615,20 @@ playlistDeleteButton tracks =
 
 viewTrack : Track -> Html Msg
 viewTrack track =
-    if track.isLocal then
-        div [ class "item" ]
-            [ div
-                [ class "ui disabled checkbox" ]
-                [ input
-                    [ type_ "checkbox"
-                    , name track.uri
-                    , id track.uri
-                    , disabled True
-                    ]
-                    []
-                , label
-                    [ for track.uri ]
-                    [ text track.name
-                    , strong [] [ text " > Can't delete local files (yet)" ]
-                    ]
+    div [ class "item" ]
+        [ div
+            [ class "ui checkbox" ]
+            [ input
+                [ type_ "checkbox"
+                , name track.uri
+                , id track.uri
+                , checked track.shouldBeDeleted
+                , onClick (ToggleTrackDeletion track)
                 ]
+                []
+            , label [ for track.uri ] [ text track.name ]
             ]
-    else
-        div [ class "item" ]
-            [ div
-                [ class "ui checkbox" ]
-                [ input
-                    [ type_ "checkbox"
-                    , name track.uri
-                    , id track.uri
-                    , checked track.shouldBeDeleted
-                    , onClick (ToggleTrackDeletion track)
-                    ]
-                    []
-                , label [ for track.uri ] [ text track.name ]
-                ]
-            ]
+        ]
 
 
 viewConfirmDeletion : Playlist -> Html Msg
