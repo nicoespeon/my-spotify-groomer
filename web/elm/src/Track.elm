@@ -1,13 +1,13 @@
 module Track exposing (Track, Msg, Model, emptyModel, update, fetchFavoriteTracks, view)
 
 import Date exposing (Date)
-import Html exposing (Html, text, form, div, label, option, select, h2, i, p, strong)
-import Html.Attributes exposing (class, value, disabled, selected)
-import Html.Events exposing (onInput)
+import Html exposing (Html, text, form, div, label, option, select, h2, i, p, strong, input, ul, li)
+import Html.Attributes exposing (id, class, value, disabled, selected, checked, type_, for, name)
+import Html.Events exposing (onInput, onClick)
 import Http exposing (Error, Request)
 import Json.Decode as Decode exposing (Decoder, at, string, bool)
 import Json.Encode as Encode
-import SemanticUI exposing (confirm, disabledDeleteButton, deleteButton, loaderBlock)
+import SemanticUI exposing (confirm, deleteButton, disabledDeleteButton, loaderBlock)
 import Task exposing (Task)
 import Time exposing (Time)
 import User exposing (UserId)
@@ -19,6 +19,7 @@ import User exposing (UserId)
 type alias Model =
     { state : State
     , playlists : List Playlist
+    , selectedPlaylist : Maybe Playlist
     , favoriteTrackUris : List TrackUri
     }
 
@@ -27,9 +28,9 @@ type State
     = LoadingPlaylists
     | PlaylistSelection
     | LoadingTracks
-    | PlaylistTracks Playlist
-    | AskingToDeleteTrack Playlist Track
-    | DeletingTrack
+    | PlaylistTracks
+    | AskingToDeleteTracks Playlist
+    | DeletingTracks
     | Errored String
 
 
@@ -51,6 +52,7 @@ type alias Track =
     , name : String
     , isLocal : Bool
     , addedAt : Date
+    , shouldBeDeleted : Bool
     }
 
 
@@ -68,6 +70,7 @@ emptyModel : Model
 emptyModel =
     { state = LoadingPlaylists
     , playlists = []
+    , selectedPlaylist = Nothing
     , favoriteTrackUris = []
     }
 
@@ -81,15 +84,16 @@ type Msg
     | PlaylistsFetched (Result Error (List Playlist))
     | SelectPlaylist PlaylistId
     | PlaylistTracksFetched (Result Error Playlist)
-    | AskToDeleteTrack Playlist Track
-    | DeleteTrack PlaylistId TrackUri
-    | TrackDeleted PlaylistId (Result Error (List Playlist))
+    | ToggleTrackDeletion Track
+    | AskToDeleteTracks
+    | DeleteTracks Playlist
+    | TracksDeleted (Result Error PlaylistId)
 
 
 update :
     (String -> Decoder (List Playlist) -> Request (List Playlist))
     -> (String -> Decoder PaginatedTracks -> Request PaginatedTracks)
-    -> (String -> Encode.Value -> Decoder (List Playlist) -> Request (List Playlist))
+    -> (String -> Encode.Value -> Decoder PlaylistId -> Request PlaylistId)
     -> Time
     -> UserId
     -> Msg
@@ -135,40 +139,60 @@ update fetch fetchPaginatedTracks delete referenceTime userId msg model =
                 ( { model | state = LoadingTracks }, cmd )
 
         PlaylistTracksFetched (Ok playlist) ->
-            ( { model | state = PlaylistTracks playlist }, Cmd.none )
+            ( { model
+                | state = PlaylistTracks
+                , selectedPlaylist = Just playlist
+              }
+            , Cmd.none
+            )
 
         PlaylistTracksFetched (Err _) ->
             ( { model | state = Errored "Failed to fetch playlist tracks." }
             , Cmd.none
             )
 
-        AskToDeleteTrack playlist track ->
-            ( { model | state = AskingToDeleteTrack playlist track }
-            , Cmd.none
+        AskToDeleteTracks ->
+            case model.selectedPlaylist of
+                Just playlist ->
+                    ( { model | state = AskingToDeleteTracks playlist }
+                    , Cmd.none
+                    )
+
+                Nothing ->
+                    ( model, Cmd.none )
+
+        DeleteTracks playlist ->
+            ( { model | state = DeletingTracks }
+            , deleteTracksFromPlaylist delete userId playlist
             )
 
-        DeleteTrack playlistId trackUri ->
-            ( { model | state = DeletingTrack }
-            , deleteTrackFromPlaylist
+        TracksDeleted (Ok playlistId) ->
+            update
+                fetch
+                fetchPaginatedTracks
                 delete
+                referenceTime
                 userId
-                model.playlists
-                playlistId
-                trackUri
-            )
+                (SelectPlaylist playlistId)
+                model
 
-        TrackDeleted playlistId (Ok playlists) ->
-            { model | playlists = playlists }
-                |> update
-                    fetch
-                    fetchPaginatedTracks
-                    delete
-                    referenceTime
-                    userId
-                    (SelectPlaylist playlistId)
-
-        TrackDeleted _ (Err _) ->
+        TracksDeleted (Err _) ->
             ( { model | state = Errored "Failed to delete track." }, Cmd.none )
+
+        ToggleTrackDeletion track ->
+            let
+                newModel =
+                    case model.selectedPlaylist of
+                        Just playlist ->
+                            { model
+                                | selectedPlaylist =
+                                    Just (toggleTrackDeletionInPlaylist track playlist)
+                            }
+
+                        Nothing ->
+                            model
+            in
+                ( newModel, Cmd.none )
 
 
 playlistsOwnedByUser : UserId -> List Playlist -> List Playlist
@@ -193,6 +217,31 @@ playlistsWithoutTrack trackUri =
                         playlist.tracks
             }
         )
+
+
+toggleTrackDeletionInPlaylist : Track -> Playlist -> Playlist
+toggleTrackDeletionInPlaylist trackToUpdate playlist =
+    { playlist
+        | tracks =
+            List.map
+                (\track ->
+                    if track == trackToUpdate then
+                        toggleTrackDeletion track
+                    else
+                        track
+                )
+                playlist.tracks
+    }
+
+
+toggleTrackDeletion : Track -> Track
+toggleTrackDeletion track =
+    { track | shouldBeDeleted = not track.shouldBeDeleted }
+
+
+tracksToBeDeleted : List Track -> List Track
+tracksToBeDeleted =
+    List.filter .shouldBeDeleted
 
 
 playlistsDecoder : Decoder (List Playlist)
@@ -254,11 +303,12 @@ tracksDecoder : Decoder (List Track)
 tracksDecoder =
     at [ "items" ]
         (Decode.list
-            (Decode.map4 Track
+            (Decode.map5 Track
                 (at [ "track", "uri" ] string)
                 (at [ "track", "name" ] string)
                 (at [ "is_local" ] bool)
                 (at [ "added_at" ] decodeDate)
+                (Decode.succeed False)
             )
         )
 
@@ -368,34 +418,35 @@ hasBeenCreated7DaysBefore referenceTime track =
         trackAddedAtInMs < (referenceTimeInMs - msFor7Days)
 
 
-deleteTrackFromPlaylist :
-    (String -> Encode.Value -> Decoder (List Playlist) -> Request (List Playlist))
+deleteTracksFromPlaylist :
+    (String -> Encode.Value -> Decoder PlaylistId -> Request PlaylistId)
     -> UserId
-    -> List Playlist
-    -> PlaylistId
-    -> TrackUri
+    -> Playlist
     -> Cmd Msg
-deleteTrackFromPlaylist delete userId playlists playlistId trackUri =
+deleteTracksFromPlaylist delete userId playlist =
     let
+        tracksToDelete =
+            tracksToBeDeleted playlist.tracks
+
         url =
-            "/users/" ++ userId ++ "/playlists/" ++ playlistId ++ "/tracks"
+            "/users/" ++ userId ++ "/playlists/" ++ playlist.id ++ "/tracks"
 
         body =
             Encode.object
                 [ ( "tracks"
-                  , Encode.list
-                        [ Encode.object
-                            [ ( "uri", Encode.string trackUri ) ]
-                        ]
+                  , tracksToDelete
+                        |> List.map
+                            (\track ->
+                                Encode.object
+                                    [ ( "uri", Encode.string track.uri ) ]
+                            )
+                        |> Encode.list
                   )
                 ]
-
-        playlistWithoutTrackDecoder =
-            Decode.succeed (playlistsWithoutTrack trackUri playlists)
     in
         Http.send
-            (TrackDeleted playlistId)
-            (delete url body playlistWithoutTrackDecoder)
+            TracksDeleted
+            (delete url body (Decode.succeed playlist.id))
 
 
 
@@ -417,16 +468,21 @@ view model =
                 , loaderBlock "Fetching playlist tracks…"
                 ]
 
-        PlaylistTracks selectedPlaylist ->
-            div []
-                [ viewPlaylistSelectForm model.playlists
-                , viewPlaylistTracks selectedPlaylist
-                ]
+        PlaylistTracks ->
+            case model.selectedPlaylist of
+                Just playlist ->
+                    div []
+                        [ viewPlaylistSelectForm model.playlists
+                        , viewPlaylistTracks playlist
+                        ]
 
-        AskingToDeleteTrack playlist track ->
-            viewConfirmDeleteTrack playlist track
+                Nothing ->
+                    viewPlaylistSelectForm model.playlists
 
-        DeletingTrack ->
+        AskingToDeleteTracks playlist ->
+            viewConfirmDeletion playlist
+
+        DeletingTracks ->
             loaderBlock "Deleting the track…"
 
         Errored message ->
@@ -450,67 +506,141 @@ viewPlaylistSelectForm playlists =
             [ div
                 [ class "field" ]
                 [ label [] [ text "Which playlist would you like to groom?" ]
-                , select [ class "ui fluid dropdown", onInput SelectPlaylist ] playlistOptions
+                , select
+                    [ class "ui fluid dropdown", onInput SelectPlaylist ]
+                    playlistOptions
                 ]
             ]
 
 
 viewPlaylistTracks : Playlist -> Html Msg
 viewPlaylistTracks playlist =
-    div []
-        [ h2
-            [ class "ui section horizontal divider header" ]
-            [ i [ class "music icon" ] [], text playlist.name ]
-        , p
-            []
-            [ text "Here are the "
-            , strong []
-                [ text
-                    ((playlist.tracks |> List.length |> toString) ++ " songs ")
-                ]
-            , text "you don't listen much in this playlist:"
-            ]
-        , div
-            [ class "ui divided relaxed list" ]
-            (List.map (viewTrack (AskToDeleteTrack playlist)) playlist.tracks)
-        ]
-
-
-viewTrack : (Track -> a) -> Track -> Html a
-viewTrack onDeleteButtonMsg track =
-    div [ class "item" ]
-        [ div
-            [ class "right floated content" ]
-            [ viewDeleteTrackButton onDeleteButtonMsg track ]
-        , div
-            [ class "content" ]
-            [ p [ class "header" ] [ text track.name ] ]
-        ]
-
-
-viewDeleteTrackButton : (Track -> a) -> Track -> Html a
-viewDeleteTrackButton onDeleteButtonMsg track =
-    if track.isLocal then
-        disabledDeleteButton "I can't delete local files from your playlist (yet)"
-    else
-        deleteButton (onDeleteButtonMsg track)
-
-
-viewConfirmDeleteTrack : Playlist -> Track -> Html Msg
-viewConfirmDeleteTrack playlist track =
     let
-        message =
-            div []
-                [ text "Do you really want to delete "
-                , strong [] [ text track.name ]
-                , text " from "
-                , strong [] [ text playlist.name ]
-                , text "?"
-                ]
+        nbTracks =
+            playlist.tracks |> List.length |> toString
     in
-        confirm
-            (DeleteTrack playlist.id track.uri)
-            (SelectPlaylist playlist.id)
-            message
-            "Yes, delete it"
-            "No, keep the track"
+        div []
+            [ h2
+                [ class "ui section horizontal divider header" ]
+                [ i [ class "music icon" ] [], text playlist.name ]
+            , p
+                []
+                [ text "Here are the "
+                , strong [] [ text (nbTracks ++ " songs ") ]
+                , text "you don't listen much in this playlist:"
+                ]
+            , playlistDeleteButton playlist.tracks
+            , div
+                [ class "ui relaxed list" ]
+                (List.map viewTrack playlist.tracks)
+            ]
+
+
+playlistDeleteButton : List Track -> Html Msg
+playlistDeleteButton tracks =
+    let
+        nbSelectedTracks =
+            tracks |> tracksToBeDeleted |> List.length |> toString
+    in
+        case nbSelectedTracks of
+            "0" ->
+                disabledDeleteButton "Select songs to delete"
+
+            "1" ->
+                deleteButton
+                    AskToDeleteTracks
+                    "Delete the selected song"
+
+            _ ->
+                deleteButton
+                    AskToDeleteTracks
+                    ("Delete the " ++ nbSelectedTracks ++ " selected songs")
+
+
+viewTrack : Track -> Html Msg
+viewTrack track =
+    if track.isLocal then
+        div [ class "item" ]
+            [ div
+                [ class "ui disabled checkbox" ]
+                [ input
+                    [ type_ "checkbox"
+                    , name track.uri
+                    , id track.uri
+                    , disabled True
+                    ]
+                    []
+                , label
+                    [ for track.uri ]
+                    [ text track.name
+                    , strong [] [ text " > Can't delete local files (yet)" ]
+                    ]
+                ]
+            ]
+    else
+        div [ class "item" ]
+            [ div
+                [ class "ui checkbox" ]
+                [ input
+                    [ type_ "checkbox"
+                    , name track.uri
+                    , id track.uri
+                    , checked track.shouldBeDeleted
+                    , onClick (ToggleTrackDeletion track)
+                    ]
+                    []
+                , label [ for track.uri ] [ text track.name ]
+                ]
+            ]
+
+
+viewConfirmDeletion : Playlist -> Html Msg
+viewConfirmDeletion playlist =
+    let
+        selectedTracks =
+            tracksToBeDeleted playlist.tracks
+
+        selectedTracksNames =
+            selectedTracks |> List.map .name
+
+        nbSelectedTracks =
+            selectedTracks |> List.length |> toString
+
+        confirmDeletion =
+            confirm
+                (DeleteTracks playlist)
+                (SelectPlaylist playlist.id)
+    in
+        if nbSelectedTracks == "1" then
+            confirmDeletion
+                (div []
+                    [ text "Do you really want to delete "
+                    , strong [] [ text (List.foldr (++) "" selectedTracksNames) ]
+                    , text " from "
+                    , strong [] [ text playlist.name ]
+                    , text "?"
+                    ]
+                )
+                "Yes, delete it"
+                "No, keep it"
+        else
+            confirmDeletion
+                (div []
+                    [ p
+                        []
+                        [ text "Do you really want to delete these "
+                        , strong [] [ text nbSelectedTracks ]
+                        , text " tracks from "
+                        , strong [] [ text playlist.name ]
+                        , text "?"
+                        ]
+                    , ul
+                        [ class "ui list" ]
+                        (List.map
+                            (\name -> li [] [ text name ])
+                            selectedTracksNames
+                        )
+                    ]
+                )
+                "Yes, delete them"
+                "No, keep them"

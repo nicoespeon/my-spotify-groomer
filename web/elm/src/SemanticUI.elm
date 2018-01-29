@@ -16,6 +16,7 @@ confirm : a -> a -> Html a -> String -> String -> Html a
 confirm onConfirmMsg onCancelMsg message confirmText cancelText =
     div []
         [ message
+        , div [ class "ui divider " ] []
         , button
             [ class "ui icon red button", onClick onConfirmMsg ]
             [ text confirmText ]
@@ -25,21 +26,18 @@ confirm onConfirmMsg onCancelMsg message confirmText cancelText =
         ]
 
 
-deleteButton : a -> Html a
-deleteButton onClickMsg =
+deleteButton : a -> String -> Html a
+deleteButton onClickMsg message =
     button
-        [ class "ui icon red button", onClick onClickMsg ]
-        [ i [ class "trash outline icon" ] [] ]
+        [ class "ui red button", onClick onClickMsg ]
+        [ i [ class "trash outline icon" ] [], text message ]
 
 
 disabledDeleteButton : String -> Html a
-disabledDeleteButton reason =
-    div
-        [ attribute "data-tooltip" reason, attribute "data-inverted" "" ]
-        [ button
-            [ class "ui icon disabled red button" ]
-            [ i [ class "trash outline icon" ] [] ]
-        ]
+disabledDeleteButton message =
+    button
+        [ class "ui disabled red button" ]
+        [ i [ class "trash outline icon" ] [], text message ]
 
 
 loader : String -> Html a

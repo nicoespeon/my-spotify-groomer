@@ -38,7 +38,9 @@
     "icon",
     "divider",
     "transition",
-    "popup"
+    "popup",
+    "checkbox",
+    "input"
   ],
   "version": "2.2.13"
 }
