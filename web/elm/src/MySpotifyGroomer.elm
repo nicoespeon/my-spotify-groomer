@@ -3,11 +3,11 @@ port module MySpotifyGroomer exposing (main)
 import Html exposing (Html, program, h1, div, text, nav)
 import Html.Attributes exposing (class)
 import Navigation exposing (load)
+import Playlist exposing (Playlist)
 import SemanticUI exposing (confirm, loader, loaderBlock)
 import Spotify exposing (AccessToken, get, delete)
 import Task exposing (Task)
 import Time exposing (Time)
-import Track exposing (Track)
 import User exposing (User, UserId)
 
 
@@ -29,7 +29,7 @@ type alias Model =
     { accessToken : AccessToken
     , state : State
     , user : User
-    , track : Track.Model
+    , playlist : Playlist.Model
     , referenceTime : Time
     }
 
@@ -51,7 +51,7 @@ emptyModel =
     { accessToken = ""
     , state = Blank
     , user = User "" "" Nothing
-    , track = Track.emptyModel
+    , playlist = Playlist.emptyModel
     , referenceTime = 0
     }
 
@@ -64,7 +64,7 @@ type Msg
     = ReferenceTimeSet Time
     | LogIn AccessToken
     | UserMsg User.Msg
-    | TrackMsg Track.Msg
+    | PlaylistMsg Playlist.Msg
 
 
 update : Msg -> Model -> ( Model, Cmd Msg )
@@ -97,20 +97,20 @@ update msg model =
             in
                 ( { model | state = newState, user = newUser }, newCmd )
 
-        TrackMsg trackMsg ->
+        PlaylistMsg playlistMsg ->
             let
-                ( newTrack, newTrackMsg ) =
-                    Track.update
+                ( newPlaylist, newPlaylistMsg ) =
+                    Playlist.update
                         (Spotify.get model.accessToken)
                         (Spotify.get model.accessToken)
                         (Spotify.delete model.accessToken)
                         model.referenceTime
                         model.user.id
-                        trackMsg
-                        model.track
+                        playlistMsg
+                        model.playlist
             in
-                ( { model | state = Loaded, track = newTrack }
-                , Cmd.map TrackMsg newTrackMsg
+                ( { model | state = Loaded, playlist = newPlaylist }
+                , Cmd.map PlaylistMsg newPlaylistMsg
                 )
 
 
@@ -127,8 +127,8 @@ fetchUser accessToken =
 
 fetchFavoriteTracks : AccessToken -> Cmd Msg
 fetchFavoriteTracks accessToken =
-    Track.fetchFavoriteTracks (Spotify.get accessToken)
-        |> Cmd.map TrackMsg
+    Playlist.fetchFavoriteTracks (Spotify.get accessToken)
+        |> Cmd.map PlaylistMsg
 
 
 
@@ -149,7 +149,7 @@ view model =
                 [ mainNav model.user
                 , mainContainer
                     [ pageTitle
-                    , Track.view model.track |> Html.map TrackMsg
+                    , Playlist.view model.playlist |> Html.map PlaylistMsg
                     ]
                 ]
 
