@@ -1,8 +1,8 @@
 module Playlist exposing (Playlist, Msg, Model, emptyModel, update, fetchFavoriteTracks, view)
 
-import Html exposing (Html, text, form, div, label, option, select, h2, i, p, strong, ul, li)
+import Html exposing (Html, text, form, div, label, option, select, h2, i, p, strong, ul, li, button)
 import Html.Attributes exposing (id, class, value, disabled, selected)
-import Html.Events exposing (onInput)
+import Html.Events exposing (onInput, onClick)
 import Http exposing (Error, Request)
 import Json.Decode as Decode exposing (Decoder, at, string, bool)
 import Json.Encode as Encode
@@ -21,6 +21,7 @@ type alias Model =
     , playlists : List Playlist
     , selectedPlaylist : Maybe Playlist
     , favoriteTrackUris : List TrackUri
+    , isSelectingTracks : Bool
     }
 
 
@@ -28,7 +29,7 @@ type State
     = LoadingPlaylists
     | PlaylistSelection
     | LoadingTracks
-    | PlaylistTracks Time
+    | PlaylistTracks
     | AskingToDeleteTracks Playlist
     | DeletingTracks
     | Errored String
@@ -58,7 +59,14 @@ emptyModel =
     , playlists = []
     , selectedPlaylist = Nothing
     , favoriteTrackUris = []
+    , isSelectingTracks = False
     }
+
+
+type AllTracksSelectionInPlaylist
+    = Selected
+    | Unselected
+    | Mix
 
 
 
@@ -71,6 +79,7 @@ type Msg
     | SelectPlaylist PlaylistId
     | PlaylistTracksFetched (Result Error Playlist)
     | ToggleTrackDeletion Track
+    | ToggleTracksDeletion
     | AskToDeleteTracks
     | DeleteTracks Playlist
     | TracksDeleted (Result Error Playlist)
@@ -114,6 +123,8 @@ update fetch fetchPaginatedTracks delete referenceTime userId msg model =
                     case selectedPlaylist playlistId model.playlists of
                         Just playlist ->
                             fetchPlaylistTracks
+                                referenceTime
+                                model.favoriteTrackUris
                                 fetchPaginatedTracks
                                 { playlist | tracks = [] }
 
@@ -124,8 +135,9 @@ update fetch fetchPaginatedTracks delete referenceTime userId msg model =
 
         PlaylistTracksFetched (Ok playlist) ->
             ( { model
-                | state = PlaylistTracks referenceTime
+                | state = PlaylistTracks
                 , selectedPlaylist = Just playlist
+                , isSelectingTracks = False
               }
             , Cmd.none
             )
@@ -164,19 +176,10 @@ update fetch fetchPaginatedTracks delete referenceTime userId msg model =
             ( { model | state = Errored "Failed to delete tracks." }, Cmd.none )
 
         ToggleTrackDeletion track ->
-            let
-                newModel =
-                    case model.selectedPlaylist of
-                        Just playlist ->
-                            { model
-                                | selectedPlaylist =
-                                    Just (toggleTrackDeletionInPlaylist track playlist)
-                            }
+            ( toggleTrackDeletion model track, Cmd.none )
 
-                        Nothing ->
-                            model
-            in
-                ( newModel, Cmd.none )
+        ToggleTracksDeletion ->
+            ( toggleTracksDeletion model, Cmd.none )
 
 
 playlistsOwnedByUser : UserId -> List Playlist -> List Playlist
@@ -190,8 +193,59 @@ selectedPlaylist playlistId =
         >> List.head
 
 
-toggleTrackDeletionInPlaylist : Track -> Playlist -> Playlist
-toggleTrackDeletionInPlaylist trackToUpdate playlist =
+setTracksDeletion : Playlist -> Bool -> Playlist
+setTracksDeletion playlist shouldBeDeleted =
+    { playlist
+        | tracks = List.map (Track.setDeletion shouldBeDeleted) playlist.tracks
+    }
+
+
+toggleTracksDeletion : Model -> Model
+toggleTracksDeletion model =
+    let
+        isSelectingTracks =
+            not model.isSelectingTracks
+    in
+        case model.selectedPlaylist of
+            Just playlist ->
+                { model
+                    | isSelectingTracks = isSelectingTracks
+                    , selectedPlaylist =
+                        Just (setTracksDeletion playlist isSelectingTracks)
+                }
+
+            Nothing ->
+                model
+
+
+toggleTrackDeletion : Model -> Track -> Model
+toggleTrackDeletion model trackToUpdate =
+    case model.selectedPlaylist of
+        Just playlist ->
+            let
+                selectedPlaylist =
+                    toggleTrackDeletionInPlaylist playlist trackToUpdate
+
+                isSelectingTracks =
+                    if allTracksAreSelected selectedPlaylist then
+                        True
+                    else if allTracksAreUnselected selectedPlaylist then
+                        False
+                    else
+                        model.isSelectingTracks
+            in
+                { model
+                    | isSelectingTracks = isSelectingTracks
+                    , selectedPlaylist =
+                        Just selectedPlaylist
+                }
+
+        Nothing ->
+            model
+
+
+toggleTrackDeletionInPlaylist : Playlist -> Track -> Playlist
+toggleTrackDeletionInPlaylist playlist trackToUpdate =
     { playlist
         | tracks =
             List.map
@@ -203,6 +257,16 @@ toggleTrackDeletionInPlaylist trackToUpdate playlist =
                 )
                 playlist.tracks
     }
+
+
+allTracksAreSelected : Playlist -> Bool
+allTracksAreSelected playlist =
+    List.all .shouldBeDeleted playlist.tracks
+
+
+allTracksAreUnselected : Playlist -> Bool
+allTracksAreUnselected playlist =
+    List.all (\track -> not track.shouldBeDeleted) playlist.tracks
 
 
 updatePlaylists : Model -> Playlist -> Model
@@ -253,14 +317,18 @@ fetchFavoriteTracks fetch =
 
 
 fetchPlaylistTracks :
-    (String -> Decoder PaginatedTracks -> Request PaginatedTracks)
+    Time
+    -> List TrackUri
+    -> (String -> Decoder PaginatedTracks -> Request PaginatedTracks)
     -> Playlist
     -> Cmd Msg
-fetchPlaylistTracks fetch playlist =
+fetchPlaylistTracks referenceTime favoriteTrackUris fetch playlist =
     Track.fetchTracks
-        fetch
         PlaylistTracksFetched
+        referenceTime
+        favoriteTrackUris
         (\tracks -> Task.succeed { playlist | tracks = tracks })
+        fetch
         (playlist.tracksUrl ++ "?fields=items(track.name,track.uri,is_local,added_at),next")
 
 
@@ -310,15 +378,14 @@ view model =
                 , loaderBlock "Fetching playlist tracks…"
                 ]
 
-        PlaylistTracks referenceTime ->
+        PlaylistTracks ->
             case model.selectedPlaylist of
                 Just playlist ->
                     div []
                         [ viewPlaylistSelectForm model.playlists
-                        , viewPlaylistNotListenedTracks
+                        , viewPlaylistTracks
                             playlist
-                            referenceTime
-                            model.favoriteTrackUris
+                            model.isSelectingTracks
                         ]
 
                 Nothing ->
@@ -358,15 +425,11 @@ viewPlaylistSelectForm playlists =
             ]
 
 
-viewPlaylistNotListenedTracks : Playlist -> Time -> List TrackUri -> Html Msg
-viewPlaylistNotListenedTracks playlist referenceTime favoriteTrackUris =
+viewPlaylistTracks : Playlist -> Bool -> Html Msg
+viewPlaylistTracks playlist isSelectingTracks =
     let
-        tracks =
-            playlist.tracks
-                |> List.filter (Track.isNotListenedAnymore referenceTime favoriteTrackUris)
-
         nbTracks =
-            tracks |> List.length |> toString
+            playlist.tracks |> List.length |> toString
     in
         div []
             [ h2
@@ -378,10 +441,11 @@ viewPlaylistNotListenedTracks playlist referenceTime favoriteTrackUris =
                 , strong [] [ text (nbTracks ++ " songs ") ]
                 , text "you don't listen much in this playlist:"
                 ]
-            , playlistDeleteButton tracks
+            , toggleSelectionButton isSelectingTracks
+            , playlistDeleteButton playlist.tracks
             , div
                 [ class "ui relaxed list" ]
-                (List.map viewTrack tracks)
+                (List.map viewTrack playlist.tracks)
             ]
 
 
@@ -404,6 +468,20 @@ playlistDeleteButton tracks =
                 deleteButton
                     AskToDeleteTracks
                     ("Delete the " ++ nbSelectedTracks ++ " selected songs")
+
+
+toggleSelectionButton : Bool -> Html Msg
+toggleSelectionButton isSelectingTracks =
+    let
+        labelText =
+            if isSelectingTracks then
+                "Unselect all"
+            else
+                "Select all"
+    in
+        button
+            [ class "ui button", onClick ToggleTracksDeletion ]
+            [ text labelText ]
 
 
 viewTrack : Track -> Html Msg

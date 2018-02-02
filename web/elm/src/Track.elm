@@ -5,9 +5,9 @@ module Track
         , PaginatedTracks
         , fetchFavoriteTracks
         , fetchTracks
+        , setDeletion
         , toggleDeletion
         , toBeDeleted
-        , isNotListenedAnymore
         , localDeleteBody
         , notLocalDeleteBody
         , view
@@ -87,24 +87,31 @@ getTrackUris fetchTrackUris trackUris =
 
 
 fetchTracks :
-    (String -> Decoder PaginatedTracks -> Request PaginatedTracks)
-    -> (Result Error a -> b)
+    (Result Error a -> b)
+    -> Time
+    -> List TrackUri
     -> (List Track -> Task Error a)
+    -> (String -> Decoder PaginatedTracks -> Request PaginatedTracks)
     -> String
     -> Cmd b
-fetchTracks fetch msg onTracksFetched url =
+fetchTracks msg referenceTime favoriteTrackUris onTracksFetched fetch url =
     Task.attempt
         msg
-        (fetchTracksWithUrl fetch onTracksFetched url [])
+        (fetchTracksWithUrl fetch url []
+            |> Task.andThen
+                (onTracksFetched
+                    << List.filter
+                        (isNotListenedAnymore referenceTime favoriteTrackUris)
+                )
+        )
 
 
 fetchTracksWithUrl :
     (String -> Decoder PaginatedTracks -> Request PaginatedTracks)
-    -> (List Track -> Task Error a)
     -> String
     -> List Track
-    -> Task Error a
-fetchTracksWithUrl fetch onTracksFetched url tracks =
+    -> Task Error (List Track)
+fetchTracksWithUrl fetch url tracks =
     Http.toTask (fetch url paginatedTracksDecoder)
         |> Task.andThen
             (\paginatedTracks ->
@@ -114,10 +121,10 @@ fetchTracksWithUrl fetch onTracksFetched url tracks =
                 in
                     case paginatedTracks.next of
                         Just nextUrl ->
-                            fetchTracksWithUrl fetch onTracksFetched nextUrl newTracks
+                            fetchTracksWithUrl fetch nextUrl newTracks
 
                         Nothing ->
-                            onTracksFetched (addPositionToTracks newTracks)
+                            Task.succeed (addPositionToTracks newTracks)
             )
 
 
@@ -162,6 +169,11 @@ decodeDate =
 addPositionToTracks : List Track -> List Track
 addPositionToTracks =
     List.indexedMap (\i track -> { track | position = i })
+
+
+setDeletion : Bool -> Track -> Track
+setDeletion shouldBeDeleted track =
+    { track | shouldBeDeleted = shouldBeDeleted }
 
 
 toggleDeletion : Track -> Track
