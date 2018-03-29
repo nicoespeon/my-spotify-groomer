@@ -1,12 +1,22 @@
-module Playlist exposing (Playlist, Msg, Model, emptyModel, update, fetchFavoriteTracks, view)
+module Playlist
+    exposing
+        ( Playlist
+        , PlaylistId
+        , SnapshotId
+        , Msg
+        , Model
+        , emptyModel
+        , update
+        , fetchFavoriteTracks
+        , view
+        )
 
 import Html exposing (Html, text, form, div, label, option, select, h2, i, p, strong, ul, li, button)
 import Html.Attributes exposing (id, class, value, disabled, selected)
 import Html.Events exposing (onInput, onClick)
 import Http exposing (Error, Request)
-import Json.Decode as Decode exposing (Decoder, at, string, bool)
-import Json.Encode as Encode
 import SemanticUI exposing (confirm, deleteButton, disabledDeleteButton, loaderBlock)
+import Spotify exposing (Url, Offset, Limit, IsLocal)
 import Task exposing (Task)
 import Time exposing (Time)
 import Track exposing (Track, TrackUri, PaginatedTracks)
@@ -86,18 +96,18 @@ type Msg
 
 
 update :
-    (String -> Decoder (List Playlist) -> Request (List Playlist))
-    -> (String -> Decoder PaginatedTracks -> Request PaginatedTracks)
-    -> (String -> Encode.Value -> Decoder SnapshotId -> Request SnapshotId)
+    Request (List Playlist)
+    -> (Url -> Request PaginatedTracks)
+    -> (PlaylistId -> SnapshotId -> List Track -> IsLocal -> Request SnapshotId)
     -> Time
     -> UserId
     -> Msg
     -> Model
     -> ( Model, Cmd Msg )
-update fetch fetchPaginatedTracks delete referenceTime userId msg model =
+update getCurrentUserPlaylists getPlaylistTracks removeTracksFromPlaylist referenceTime userId msg model =
     case msg of
         FavoriteTracksFetched (Ok trackUris) ->
-            ( { model | favoriteTrackUris = trackUris }, fetchPlaylists fetch )
+            ( { model | favoriteTrackUris = trackUris }, fetchPlaylists getCurrentUserPlaylists )
 
         FavoriteTracksFetched (Err _) ->
             ( { model | state = Errored "Failed to fetch user top tracks." }
@@ -125,7 +135,7 @@ update fetch fetchPaginatedTracks delete referenceTime userId msg model =
                             fetchPlaylistTracks
                                 referenceTime
                                 model.favoriteTrackUris
-                                fetchPaginatedTracks
+                                getPlaylistTracks
                                 { playlist | tracks = [] }
 
                         Nothing ->
@@ -159,15 +169,17 @@ update fetch fetchPaginatedTracks delete referenceTime userId msg model =
 
         DeleteTracks playlist ->
             ( { model | state = DeletingTracks }
-            , deleteTracksFromPlaylist delete userId playlist
+            , deleteTracksFromPlaylist
+                (removeTracksFromPlaylist playlist.id playlist.snapshotId)
+                playlist
             )
 
         TracksDeleted (Ok playlist) ->
             updatePlaylists model playlist
                 |> update
-                    fetch
-                    fetchPaginatedTracks
-                    delete
+                    getCurrentUserPlaylists
+                    getPlaylistTracks
+                    removeTracksFromPlaylist
                     referenceTime
                     userId
                     (SelectPlaylist playlist.id)
@@ -284,79 +296,46 @@ updatePlaylists model newPlaylist =
     }
 
 
-fetchPlaylists : (String -> Decoder (List Playlist) -> Request (List Playlist)) -> Cmd Msg
-fetchPlaylists fetch =
-    Http.send
-        PlaylistsFetched
-        (fetch "/me/playlists?fields=items(id,owner.id,name,tracks.href,snapshot_id)&limit=50" playlistsDecoder)
+fetchPlaylists : Request (List Playlist) -> Cmd Msg
+fetchPlaylists getCurrentUserPlaylists =
+    Http.send PlaylistsFetched getCurrentUserPlaylists
 
 
-playlistsDecoder : Decoder (List Playlist)
-playlistsDecoder =
-    at [ "items" ]
-        (Decode.list
-            (Decode.map6 Playlist
-                (at [ "id" ] string)
-                (at [ "owner", "id" ] string)
-                (at [ "name" ] string)
-                snapshotIdDecoder
-                (at [ "tracks", "href" ] string)
-                (Decode.succeed [])
-            )
-        )
-
-
-snapshotIdDecoder : Decoder SnapshotId
-snapshotIdDecoder =
-    at [ "snapshot_id" ] string
-
-
-fetchFavoriteTracks : (String -> Decoder (List TrackUri) -> Request (List TrackUri)) -> Cmd Msg
-fetchFavoriteTracks fetch =
-    Track.fetchFavoriteTracks fetch FavoriteTracksFetched
+fetchFavoriteTracks : (Offset -> Limit -> Request (List TrackUri)) -> Cmd Msg
+fetchFavoriteTracks getCurrentUserTopTracks =
+    Track.fetchFavoriteTracks getCurrentUserTopTracks FavoriteTracksFetched
 
 
 fetchPlaylistTracks :
     Time
     -> List TrackUri
-    -> (String -> Decoder PaginatedTracks -> Request PaginatedTracks)
+    -> (Url -> Request PaginatedTracks)
     -> Playlist
     -> Cmd Msg
-fetchPlaylistTracks referenceTime favoriteTrackUris fetch playlist =
+fetchPlaylistTracks referenceTime favoriteTrackUris getPlaylistTracks playlist =
     Track.fetchTracks
         PlaylistTracksFetched
         referenceTime
         favoriteTrackUris
         (\tracks -> Task.succeed { playlist | tracks = tracks })
-        fetch
-        (playlist.tracksUrl ++ "?fields=items(track.name,track.uri,is_local,added_at),next")
+        getPlaylistTracks
+        playlist.tracksUrl
 
 
 deleteTracksFromPlaylist :
-    (String -> Encode.Value -> Decoder SnapshotId -> Request SnapshotId)
-    -> UserId
+    (List Track -> IsLocal -> Request SnapshotId)
     -> Playlist
     -> Cmd Msg
-deleteTracksFromPlaylist deleteRequest userId playlist =
+deleteTracksFromPlaylist removeTracksFromPlaylist playlist =
     let
-        url =
-            "/users/" ++ userId ++ "/playlists/" ++ playlist.id ++ "/tracks"
-
-        localTracksDeleteBody =
-            Track.localDeleteBody playlist.snapshotId playlist.tracks
-
-        notLocalTracksDeleteBody =
-            Track.notLocalDeleteBody playlist.tracks
-
-        delete body =
-            Http.toTask
-                (deleteRequest url body snapshotIdDecoder)
+        delete tracks isLocal =
+            Http.toTask (removeTracksFromPlaylist tracks isLocal)
     in
         Task.attempt TracksDeleted <|
             Task.map2
                 (\_ newSnapshotId -> { playlist | snapshotId = newSnapshotId })
-                (delete localTracksDeleteBody)
-                (delete notLocalTracksDeleteBody)
+                (delete (Track.localsToBeDeleted playlist.tracks) True)
+                (delete (Track.notLocalsToBeDeleted playlist.tracks) False)
 
 
 

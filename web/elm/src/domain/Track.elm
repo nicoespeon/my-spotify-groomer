@@ -8,8 +8,8 @@ module Track
         , setDeletion
         , toggleDeletion
         , toBeDeleted
-        , localDeleteBody
-        , notLocalDeleteBody
+        , localsToBeDeleted
+        , notLocalsToBeDeleted
         , view
         )
 
@@ -18,8 +18,7 @@ import Html exposing (Html, div, text, label, input)
 import Html.Attributes exposing (id, class, type_, name, checked, for)
 import Html.Events exposing (onClick)
 import Http exposing (Error, Request)
-import Json.Decode as Decode exposing (Decoder, at, string, bool)
-import Json.Encode as Encode
+import Spotify exposing (Url, Offset, Limit)
 import Task exposing (Task)
 import Time exposing (Time)
 
@@ -52,32 +51,26 @@ type alias PaginatedTracks =
 
 
 fetchFavoriteTracks :
-    (String -> Decoder (List TrackUri) -> Request (List TrackUri))
+    (Offset -> Limit -> Request (List TrackUri))
     -> (Result Error (List TrackUri) -> a)
     -> Cmd a
-fetchFavoriteTracks fetch msg =
+fetchFavoriteTracks getCurrentUserTopTracks msg =
     let
         -- Spotify limits number of top tracks that can be fetched to 50.
         -- But we can hack a bit and retrieve up to 99 using 49 as the offset.
         -- Offset of 50+ returns no track.
         -- short_term = last 4 weeks (recent listenings)
         fetchShortTermFirst50TopTracks =
-            fetch "/me/top/tracks?time_range=short_term&offset=0&limit=50" trackUrisDecoder
+            getCurrentUserTopTracks 0 50
 
         fetchShortTerm49To99TopTracks =
-            fetch "/me/top/tracks?time_range=short_term&offset=49&limit=50" trackUrisDecoder
+            getCurrentUserTopTracks 49 50
     in
         Task.attempt
             msg
             (getTrackUris fetchShortTermFirst50TopTracks []
                 |> Task.andThen (getTrackUris fetchShortTerm49To99TopTracks)
             )
-
-
-trackUrisDecoder : Decoder (List TrackUri)
-trackUrisDecoder =
-    at [ "items" ]
-        (Decode.list (at [ "uri" ] string))
 
 
 getTrackUris : Request (List TrackUri) -> List TrackUri -> Task Error (List TrackUri)
@@ -91,13 +84,13 @@ fetchTracks :
     -> Time
     -> List TrackUri
     -> (List Track -> Task Error a)
-    -> (String -> Decoder PaginatedTracks -> Request PaginatedTracks)
+    -> (Url -> Request PaginatedTracks)
     -> String
     -> Cmd b
-fetchTracks msg referenceTime favoriteTrackUris onTracksFetched fetch url =
+fetchTracks msg referenceTime favoriteTrackUris onTracksFetched getPlaylistTracks url =
     Task.attempt
         msg
-        (fetchTracksWithUrl fetch url []
+        (fetchTracksWithUrl getPlaylistTracks url []
             |> Task.andThen
                 (onTracksFetched
                     << List.filter
@@ -107,12 +100,12 @@ fetchTracks msg referenceTime favoriteTrackUris onTracksFetched fetch url =
 
 
 fetchTracksWithUrl :
-    (String -> Decoder PaginatedTracks -> Request PaginatedTracks)
+    (Url -> Request PaginatedTracks)
     -> String
     -> List Track
     -> Task Error (List Track)
-fetchTracksWithUrl fetch url tracks =
-    Http.toTask (fetch url paginatedTracksDecoder)
+fetchTracksWithUrl getPlaylistTracks url tracks =
+    Http.toTask (getPlaylistTracks url)
         |> Task.andThen
             (\paginatedTracks ->
                 let
@@ -121,48 +114,10 @@ fetchTracksWithUrl fetch url tracks =
                 in
                     case paginatedTracks.next of
                         Just nextUrl ->
-                            fetchTracksWithUrl fetch nextUrl newTracks
+                            fetchTracksWithUrl getPlaylistTracks nextUrl newTracks
 
                         Nothing ->
                             Task.succeed (addPositionToTracks newTracks)
-            )
-
-
-paginatedTracksDecoder : Decoder PaginatedTracks
-paginatedTracksDecoder =
-    Decode.map2 PaginatedTracks
-        tracksDecoder
-        (Decode.maybe (at [ "next" ] string))
-
-
-tracksDecoder : Decoder (List Track)
-tracksDecoder =
-    at [ "items" ]
-        (Decode.list
-            (Decode.map6 Track
-                (at [ "track", "uri" ] string)
-                (at [ "track", "name" ] string)
-                (at [ "is_local" ] bool)
-                (at [ "added_at" ] decodeDate)
-                -- We don't want track to be selected by default
-                (Decode.succeed False)
-                -- Position in the playlist is computed when we append the track
-                (Decode.succeed 0)
-            )
-        )
-
-
-decodeDate : Decoder Date
-decodeDate =
-    string
-        |> Decode.andThen
-            (\val ->
-                case Date.fromString val of
-                    Ok date ->
-                        Decode.succeed date
-
-                    Err err ->
-                        Decode.fail err
             )
 
 
@@ -186,6 +141,18 @@ toBeDeleted =
     List.filter .shouldBeDeleted
 
 
+localsToBeDeleted : List Track -> List Track
+localsToBeDeleted =
+    List.filter .isLocal
+        << toBeDeleted
+
+
+notLocalsToBeDeleted : List Track -> List Track
+notLocalsToBeDeleted =
+    List.filter (not << .isLocal)
+        << toBeDeleted
+
+
 isNotListenedAnymore : Time -> List TrackUri -> Track -> Bool
 isNotListenedAnymore referenceTime favoriteTrackUris track =
     not (List.member track.uri favoriteTrackUris)
@@ -207,42 +174,6 @@ hasBeenAddedNDaysBefore days referenceTime track =
                 |> Time.inMilliseconds
     in
         trackAddedAtInMs < (referenceTimeInMs - msForNDays)
-
-
-localDeleteBody : String -> List Track -> Encode.Value
-localDeleteBody snapshotId tracks =
-    if List.length tracks > 0 then
-        Encode.object
-            [ ( "positions"
-              , tracks
-                    |> List.filter .isLocal
-                    |> toBeDeleted
-                    |> List.map .position
-                    |> List.map Encode.int
-                    |> Encode.list
-              )
-            , ( "snapshot_id", Encode.string snapshotId )
-            ]
-    else
-        Encode.object
-            [ ( "tracks", Encode.list [] ) ]
-
-
-notLocalDeleteBody : List Track -> Encode.Value
-notLocalDeleteBody tracks =
-    Encode.object
-        [ ( "tracks"
-          , tracks
-                |> List.filter (not << .isLocal)
-                |> toBeDeleted
-                |> List.map
-                    (\track ->
-                        Encode.object
-                            [ ( "uri", Encode.string track.uri ) ]
-                    )
-                |> Encode.list
-          )
-        ]
 
 
 

@@ -6,7 +6,7 @@
 use Mix.Config
 
 # Configures the endpoint
-config :starter_kit_phoenix_elm, MySpotifyGroomer.Endpoint,
+config :my_spotify_groomer, MySpotifyGroomer.Endpoint,
   url: [host: "localhost"],
   secret_key_base: "Rm3Fz/RLJE7JFroiYNBonUkXohzVGVpZM0rbwN3QzkScC7cQO/RZpoRuDVpcqpvc",
   render_errors: [view: MySpotifyGroomer.ErrorView, accepts: ~w(html json)],

@@ -3,7 +3,6 @@ module User exposing (Msg, ExternalMsg(..), User, UserId, update, fetchData, vie
 import Html exposing (Html, div, text, img, span)
 import Html.Attributes exposing (class, src)
 import Http exposing (Request, Error)
-import Json.Decode as Decode exposing (Decoder, at, list, map, map3, string)
 
 
 -- MODEL
@@ -47,20 +46,9 @@ update msg model =
             ( model, FetchFailed )
 
 
-fetchData : (String -> Decoder User -> Request User) -> Cmd Msg
-fetchData fetch =
-    Http.send UserFetched (fetch "/me" decoder)
-
-
-decoder : Decoder User
-decoder =
-    map3 User
-        (at [ "id" ] string)
-        (at [ "display_name" ] string)
-        (map
-            List.head
-            (at [ "images" ] (list (at [ "url" ] string)))
-        )
+fetchData : Request User -> Cmd Msg
+fetchData getCurrentUserProfile =
+    Http.send UserFetched getCurrentUserProfile
 
 
 

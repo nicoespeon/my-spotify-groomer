@@ -1,19 +1,27 @@
 port module MySpotifyGroomer exposing (main)
 
-import Html exposing (Html, program, h1, div, text, nav)
+import Html exposing (Html, programWithFlags, h1, div, text, nav)
 import Html.Attributes exposing (class)
+import Http exposing (Request)
 import Navigation exposing (load)
 import Playlist exposing (Playlist)
 import SemanticUI exposing (confirm, loader, loaderBlock)
-import Spotify exposing (AccessToken, get, delete)
+import Spotify exposing (Offset, Limit)
+import Track exposing (TrackUri)
 import Task exposing (Task)
 import Time exposing (Time)
 import User exposing (User, UserId)
 
 
-main : Program Never Model Msg
+-- Infrastructure imports
+
+import SpotifyHttp exposing (AccessToken)
+import FakeSpotifyHttp
+
+
+main : Program Flags Model Msg
 main =
-    program
+    programWithFlags
         { init = init
         , update = update
         , view = view
@@ -31,6 +39,7 @@ type alias Model =
     , user : User
     , playlist : Playlist.Model
     , referenceTime : Time
+    , useFakeSpotifyApi : Bool
     }
 
 
@@ -41,18 +50,24 @@ type State
     | Errored String
 
 
-init : ( Model, Cmd Msg )
-init =
-    ( emptyModel, setReferenceTimeToNow )
+type alias Flags =
+    { useFakeSpotifyApi : Bool
+    }
 
 
-emptyModel : Model
-emptyModel =
+init : Flags -> ( Model, Cmd Msg )
+init flags =
+    ( emptyModel flags, setReferenceTimeToNow )
+
+
+emptyModel : Flags -> Model
+emptyModel flags =
     { accessToken = ""
     , state = Blank
     , user = User "" "" Nothing
     , playlist = Playlist.emptyModel
     , referenceTime = 0
+    , useFakeSpotifyApi = flags.useFakeSpotifyApi
     }
 
 
@@ -69,49 +84,56 @@ type Msg
 
 update : Msg -> Model -> ( Model, Cmd Msg )
 update msg model =
-    case msg of
-        ReferenceTimeSet time ->
-            ( { model | referenceTime = time }, Cmd.none )
+    let
+        spotify =
+            if model.useFakeSpotifyApi then
+                FakeSpotifyHttp.fakeSpotifyHttp
+            else
+                SpotifyHttp.spotifyHttp model.accessToken
+    in
+        case msg of
+            ReferenceTimeSet time ->
+                ( { model | referenceTime = time }, Cmd.none )
 
-        LogIn accessToken ->
-            ( { model | state = Loading, accessToken = accessToken }
-            , fetchUser accessToken
-            )
-
-        UserMsg userMsg ->
-            let
-                ( newUser, msgFromUser ) =
-                    User.update userMsg model.user
-
-                ( newState, newCmd ) =
-                    case msgFromUser of
-                        User.UserSet ->
-                            ( Loaded
-                            , fetchFavoriteTracks model.accessToken
-                            )
-
-                        User.FetchFailed ->
-                            ( Errored "Failed to fetch user data."
-                            , load "/login"
-                            )
-            in
-                ( { model | state = newState, user = newUser }, newCmd )
-
-        PlaylistMsg playlistMsg ->
-            let
-                ( newPlaylist, newPlaylistMsg ) =
-                    Playlist.update
-                        (Spotify.get model.accessToken)
-                        (Spotify.get model.accessToken)
-                        (Spotify.delete model.accessToken)
-                        model.referenceTime
-                        model.user.id
-                        playlistMsg
-                        model.playlist
-            in
-                ( { model | state = Loaded, playlist = newPlaylist }
-                , Cmd.map PlaylistMsg newPlaylistMsg
+            LogIn accessToken ->
+                ( { model | state = Loading, accessToken = accessToken }
+                , fetchUser spotify.getCurrentUserProfile
                 )
+
+            UserMsg userMsg ->
+                let
+                    ( newUser, msgFromUser ) =
+                        User.update userMsg model.user
+
+                    ( newState, newCmd ) =
+                        case msgFromUser of
+                            User.UserSet ->
+                                ( Loaded
+                                , fetchFavoriteTracks spotify.getCurrentUserTopTracks
+                                )
+
+                            User.FetchFailed ->
+                                ( Errored "Failed to fetch user data."
+                                , load "/login"
+                                )
+                in
+                    ( { model | state = newState, user = newUser }, newCmd )
+
+            PlaylistMsg playlistMsg ->
+                let
+                    ( newPlaylist, newPlaylistMsg ) =
+                        Playlist.update
+                            (spotify.getCurrentUserPlaylists)
+                            (spotify.getPlaylistTracks)
+                            (spotify.removeTracksFromPlaylist model.user.id)
+                            model.referenceTime
+                            model.user.id
+                            playlistMsg
+                            model.playlist
+                in
+                    ( { model | state = Loaded, playlist = newPlaylist }
+                    , Cmd.map PlaylistMsg newPlaylistMsg
+                    )
 
 
 setReferenceTimeToNow : Cmd Msg
@@ -119,15 +141,15 @@ setReferenceTimeToNow =
     Task.perform ReferenceTimeSet Time.now
 
 
-fetchUser : AccessToken -> Cmd Msg
-fetchUser accessToken =
-    User.fetchData (Spotify.get accessToken)
+fetchUser : Request User -> Cmd Msg
+fetchUser getCurrentUserProfile =
+    User.fetchData getCurrentUserProfile
         |> Cmd.map UserMsg
 
 
-fetchFavoriteTracks : AccessToken -> Cmd Msg
-fetchFavoriteTracks accessToken =
-    Playlist.fetchFavoriteTracks (Spotify.get accessToken)
+fetchFavoriteTracks : (Offset -> Limit -> Request (List TrackUri)) -> Cmd Msg
+fetchFavoriteTracks getCurrentUserTopTracks =
+    Playlist.fetchFavoriteTracks getCurrentUserTopTracks
         |> Cmd.map PlaylistMsg
 
 

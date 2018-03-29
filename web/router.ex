@@ -14,15 +14,20 @@ defmodule MySpotifyGroomer.Router do
   end
 
   scope "/", MySpotifyGroomer do
-    pipe_through :browser # Use the default browser stack
+    pipe_through :browser
 
     get "/", SpotifyController, :index
     get "/login", SpotifyController, :login
     get "/login-with-spotify", SpotifyController, :login_with_spotify
   end
 
-  # Other scopes may use custom stacks.
-  # scope "/api", MySpotifyGroomer do
-  #   pipe_through :api
-  # end
+  scope "/fake-spotify-api", MySpotifyGroomer do
+    pipe_through :api
+
+    get "/me", FakeSpotifyApiController, :me
+    get "/me/top/tracks", FakeSpotifyApiController, :me_top_tracks
+    get "/me/playlists", FakeSpotifyApiController, :me_playlists
+    get "/users/:user_id/playlists/:playlist_id/tracks", FakeSpotifyApiController, :user_playlist_tracks
+    delete "/users/:user_id/playlists/:playlist_id/tracks", FakeSpotifyApiController, :user_playlist_tracks_delete
+  end
 end

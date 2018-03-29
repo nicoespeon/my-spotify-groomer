@@ -20,5 +20,5 @@ defmodule MySpotifyGroomer.Gettext do
 
   See the [Gettext Docs](https://hexdocs.pm/gettext) for detailed usage.
   """
-  use Gettext, otp_app: :starter_kit_phoenix_elm
+  use Gettext, otp_app: :my_spotify_groomer
 end

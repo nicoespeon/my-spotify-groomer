@@ -1,5 +1,5 @@
 defmodule MySpotifyGroomer.Endpoint do
-  use Phoenix.Endpoint, otp_app: :starter_kit_phoenix_elm
+  use Phoenix.Endpoint, otp_app: :my_spotify_groomer
 
   socket "/socket", MySpotifyGroomer.UserSocket
 
@@ -8,7 +8,7 @@ defmodule MySpotifyGroomer.Endpoint do
   # You should set gzip to true if you are running phoenix.digest
   # when deploying your static files in production.
   plug Plug.Static,
-    at: "/", from: :starter_kit_phoenix_elm, gzip: false,
+    at: "/", from: :my_spotify_groomer, gzip: false,
     only: ~w(css fonts images themes js favicon.ico robots.txt)
 
   plug Plug.Static,
@@ -39,7 +39,7 @@ defmodule MySpotifyGroomer.Endpoint do
   # Set :encryption_salt if you would also like to encrypt it.
   plug Plug.Session,
     store: :cookie,
-    key: "_starter_kit_phoenix_elm_key",
+    key: "_my_spotify_groomer_key",
     signing_salt: "fyWKmFeG"
 
   plug MySpotifyGroomer.Router

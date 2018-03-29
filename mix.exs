@@ -2,7 +2,7 @@ defmodule MySpotifyGroomer.Mixfile do
   use Mix.Project
 
   def project do
-    [app: :starter_kit_phoenix_elm,
+    [app: :my_spotify_groomer,
      version: "0.0.1",
      elixir: "~> 1.2",
      elixirc_paths: elixirc_paths(Mix.env),

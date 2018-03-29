@@ -31,7 +31,9 @@
   const elmContainer = document.getElementById('my-spotify-groomer');
   if (!elmContainer) return;
 
-  const elmApp = Elm.MySpotifyGroomer.embed(elmContainer);
+  const elmApp = Elm.MySpotifyGroomer.embed(elmContainer, {
+    useFakeSpotifyApi: false
+  });
   elmApp.ports.accessToken.send(accessToken);
 })(document, window);
 
