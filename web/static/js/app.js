@@ -35,6 +35,7 @@
     useFakeSpotifyApi: false
   });
   elmApp.ports.accessToken.send(accessToken);
+  elmApp.ports.sendError.subscribe(displayErrorModal);
 })(document, window);
 
 function redirectToLoginPage(window) {
@@ -42,4 +43,26 @@ function redirectToLoginPage(window) {
   if (!isOnLoginPage) {
     window.location.replace('/login');
   }
+}
+
+const ERROR_MODAL_OPTIONS = {};
+
+const ERROR_MODAL_WITH_LOGIN_OPTIONS = {
+  closable: false,
+  onApprove: () => {
+    redirectToLoginPage(window);
+    return false;
+  }
+};
+
+function displayErrorModal({ title, message, button, shouldLoginAgain }) {
+  $('#error-modal-title').html(title);
+  $('#error-modal-message').html(message);
+  $('#error-modal-button').html(button);
+
+  const $errorModal = $('#error-modal');
+  const errorOptions = shouldLoginAgain
+    ? ERROR_MODAL_WITH_LOGIN_OPTIONS
+    : ERROR_MODAL_OPTIONS;
+  $errorModal.modal(errorOptions).modal('show');
 }

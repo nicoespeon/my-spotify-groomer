@@ -1,9 +1,9 @@
 port module MySpotifyGroomer exposing (main)
 
+import Error exposing (Error)
 import Html exposing (Html, programWithFlags, h1, div, text, nav)
 import Html.Attributes exposing (class)
 import Http exposing (Request)
-import Navigation exposing (load)
 import Playlist exposing (Playlist)
 import SemanticUI exposing (confirm, loader, loaderBlock)
 import Spotify exposing (Offset, Limit)
@@ -47,7 +47,6 @@ type State
     = Blank
     | Loading
     | Loaded
-    | Errored String
 
 
 type alias Flags =
@@ -112,10 +111,8 @@ update msg model =
                                 , fetchFavoriteTracks spotify.getCurrentUserTopTracks
                                 )
 
-                            User.FetchFailed ->
-                                ( Errored "Failed to fetch user data."
-                                , load "/login"
-                                )
+                            User.FetchFailed error ->
+                                ( model.state, sendError error )
                 in
                     ( { model | state = newState, user = newUser }, newCmd )
 
@@ -175,9 +172,6 @@ view model =
                     ]
                 ]
 
-        Errored message ->
-            text ("An error occurred: " ++ message)
-
 
 mainContainer : List (Html Msg) -> Html Msg
 mainContainer =
@@ -207,6 +201,9 @@ mainNav user =
 
 
 port accessToken : (String -> a) -> Sub a
+
+
+port sendError : Error -> Cmd a
 
 
 subscriptions : Model -> Sub Msg

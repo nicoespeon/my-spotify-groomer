@@ -15,6 +15,24 @@
         <%= render @view_module, @view_template, assigns %>
     </main>
 
+    <div id="error-modal" class="ui modal">
+        <div class="header">
+            😢 Uh-oh! <span id="error-modal-title">
+                <!-- Dynamically filled on error -->
+            </span>
+        </div>
+        <div class="content">
+            <p id="error-modal-message">
+                <!-- Dynamically filled on error -->
+            </p>
+        </div>
+        <div class="actions">
+            <div id="error-modal-button" class="ui positive button">
+                <!-- Dynamically filled on error -->
+            </div>
+        </div>
+    </div>
+
     <script src="<%= static_path(@conn, "/js/app.js") %>"></script>
 </body>
 </html>

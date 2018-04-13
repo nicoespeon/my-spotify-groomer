@@ -40,7 +40,8 @@
     "transition",
     "popup",
     "checkbox",
-    "input"
+    "input",
+    "modal"
   ],
   "version": "2.2.13"
 }

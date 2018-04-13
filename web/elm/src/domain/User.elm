@@ -1,5 +1,6 @@
 module User exposing (Msg, ExternalMsg(..), User, UserId, update, fetchData, view)
 
+import Error exposing (Error, fetchDataError)
 import Html exposing (Html, div, text, img, span)
 import Html.Attributes exposing (class, src)
 import Http exposing (Request, Error)
@@ -28,12 +29,12 @@ type alias UserId =
 
 
 type Msg
-    = UserFetched (Result Error User)
+    = UserFetched (Result Http.Error User)
 
 
 type ExternalMsg
     = UserSet
-    | FetchFailed
+    | FetchFailed Error.Error
 
 
 update : Msg -> Model -> ( Model, ExternalMsg )
@@ -43,12 +44,17 @@ update msg model =
             ( fetchedUser, UserSet )
 
         UserFetched (Err _) ->
-            ( model, FetchFailed )
+            ( model, FetchFailed failedToFetchUserData )
 
 
 fetchData : Request User -> Cmd Msg
 fetchData getCurrentUserProfile =
     Http.send UserFetched getCurrentUserProfile
+
+
+failedToFetchUserData : Error.Error
+failedToFetchUserData =
+    fetchDataError "profile"
 
 
 
