@@ -32,9 +32,10 @@
   if (!elmContainer) return;
 
   const elmApp = Elm.MySpotifyGroomer.embed(elmContainer, {
-    useFakeSpotifyApi: false
+    useFakeSpotifyApi: false,
+    accessToken: accessToken,
+    referenceTime: Date.now()
   });
-  elmApp.ports.accessToken.send(accessToken);
   elmApp.ports.sendError.subscribe(displayErrorModal);
 })(document, window);
 

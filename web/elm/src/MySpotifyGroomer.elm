@@ -44,28 +44,36 @@ type alias Model =
 
 
 type State
-    = Blank
-    | Loading
+    = Loading
     | Loaded
 
 
 type alias Flags =
     { useFakeSpotifyApi : Bool
+    , accessToken : AccessToken
+    , referenceTime : Time
     }
 
 
 init : Flags -> ( Model, Cmd Msg )
 init flags =
-    ( emptyModel flags, setReferenceTimeToNow )
+    let
+        spotify =
+            if flags.useFakeSpotifyApi then
+                FakeSpotifyHttp.fakeSpotifyHttp
+            else
+                SpotifyHttp.spotifyHttp flags.accessToken
+    in
+        ( initModel flags, fetchUser spotify.getCurrentUserProfile )
 
 
-emptyModel : Flags -> Model
-emptyModel flags =
-    { accessToken = ""
-    , state = Blank
+initModel : Flags -> Model
+initModel flags =
+    { accessToken = flags.accessToken
+    , state = Loading
     , user = User "" "" Nothing
     , playlist = Playlist.emptyModel
-    , referenceTime = 0
+    , referenceTime = flags.referenceTime
     , useFakeSpotifyApi = flags.useFakeSpotifyApi
     }
 
@@ -75,9 +83,7 @@ emptyModel flags =
 
 
 type Msg
-    = ReferenceTimeSet Time
-    | LogIn AccessToken
-    | UserMsg User.Msg
+    = UserMsg User.Msg
     | PlaylistMsg Playlist.Msg
 
 
@@ -91,14 +97,6 @@ update msg model =
                 SpotifyHttp.spotifyHttp model.accessToken
     in
         case msg of
-            ReferenceTimeSet time ->
-                ( { model | referenceTime = time }, Cmd.none )
-
-            LogIn accessToken ->
-                ( { model | state = Loading, accessToken = accessToken }
-                , fetchUser spotify.getCurrentUserProfile
-                )
-
             UserMsg userMsg ->
                 let
                     ( newUser, msgFromUser ) =
@@ -134,11 +132,6 @@ update msg model =
                     )
 
 
-setReferenceTimeToNow : Cmd Msg
-setReferenceTimeToNow =
-    Task.perform ReferenceTimeSet Time.now
-
-
 fetchUser : Request User -> Cmd Msg
 fetchUser getCurrentUserProfile =
     User.fetchData getCurrentUserProfile
@@ -158,9 +151,6 @@ fetchFavoriteTracks getCurrentUserTopTracks =
 view : Model -> Html Msg
 view model =
     case model.state of
-        Blank ->
-            text ""
-
         Loading ->
             loader "Fetching data from Spotify…"
 
@@ -201,12 +191,9 @@ mainNav user =
 -- SUBSCRIPTIONS
 
 
-port accessToken : (String -> a) -> Sub a
-
-
 port sendError : Error -> Cmd a
 
 
 subscriptions : Model -> Sub Msg
-subscriptions model =
-    accessToken LogIn
+subscriptions _ =
+    Sub.none
