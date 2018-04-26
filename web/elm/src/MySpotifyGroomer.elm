@@ -123,6 +123,7 @@ update msg model =
                             (spotify.getCurrentUserPlaylists)
                             (spotify.getPlaylistTracks)
                             (spotify.removeTracksFromPlaylist model.user.id)
+                            sendError
                             model.referenceTime
                             model.user.id
                             playlistMsg

@@ -11,6 +11,7 @@ module Playlist
         , view
         )
 
+import Error exposing (Error, fetchDataError)
 import Html exposing (Html, text, form, div, label, option, select, h2, i, p, strong, ul, li, button)
 import Html.Attributes exposing (id, class, value, disabled, selected)
 import Html.Events exposing (onInput, onClick)
@@ -42,7 +43,6 @@ type State
     | PlaylistTracks
     | AskingToDeleteTracks Playlist
     | DeletingTracks
-    | Errored String
 
 
 type alias Playlist =
@@ -84,35 +84,34 @@ type AllTracksSelectionInPlaylist
 
 
 type Msg
-    = FavoriteTracksFetched (Result Error (List TrackUri))
-    | PlaylistsFetched (Result Error (List Playlist))
+    = FavoriteTracksFetched (Result Http.Error (List TrackUri))
+    | PlaylistsFetched (Result Http.Error (List Playlist))
     | SelectPlaylist PlaylistId
-    | PlaylistTracksFetched (Result Error Playlist)
+    | PlaylistTracksFetched (Result Http.Error Playlist)
     | ToggleTrackDeletion Track
     | ToggleTracksDeletion
     | AskToDeleteTracks
     | DeleteTracks Playlist
-    | TracksDeleted (Result Error Playlist)
+    | TracksDeleted (Result Http.Error Playlist)
 
 
 update :
     Request (List Playlist)
     -> (Url -> Request PaginatedTracks)
     -> (PlaylistId -> SnapshotId -> List Track -> IsLocal -> Request SnapshotId)
+    -> (Error.Error -> Cmd Msg)
     -> Time
     -> UserId
     -> Msg
     -> Model
     -> ( Model, Cmd Msg )
-update getCurrentUserPlaylists getPlaylistTracks removeTracksFromPlaylist referenceTime userId msg model =
+update getCurrentUserPlaylists getPlaylistTracks removeTracksFromPlaylist sendError referenceTime userId msg model =
     case msg of
         FavoriteTracksFetched (Ok trackUris) ->
             ( { model | favoriteTrackUris = trackUris }, fetchPlaylists getCurrentUserPlaylists )
 
         FavoriteTracksFetched (Err _) ->
-            ( { model | state = Errored "Failed to fetch user top tracks." }
-            , Cmd.none
-            )
+            ( model, sendError failedToFetchFavoriteTracks )
 
         PlaylistsFetched (Ok playlists) ->
             ( { model
@@ -123,9 +122,7 @@ update getCurrentUserPlaylists getPlaylistTracks removeTracksFromPlaylist refere
             )
 
         PlaylistsFetched (Err _) ->
-            ( { model | state = Errored "Failed to fetch user playlists." }
-            , Cmd.none
-            )
+            ( model, sendError failedToFetchPlaylists )
 
         SelectPlaylist playlistId ->
             let
@@ -153,9 +150,7 @@ update getCurrentUserPlaylists getPlaylistTracks removeTracksFromPlaylist refere
             )
 
         PlaylistTracksFetched (Err _) ->
-            ( { model | state = Errored "Failed to fetch playlist tracks." }
-            , Cmd.none
-            )
+            ( model, sendError failedToFetchPlaylistTracks )
 
         AskToDeleteTracks ->
             case model.selectedPlaylist of
@@ -180,18 +175,45 @@ update getCurrentUserPlaylists getPlaylistTracks removeTracksFromPlaylist refere
                     getCurrentUserPlaylists
                     getPlaylistTracks
                     removeTracksFromPlaylist
+                    sendError
                     referenceTime
                     userId
                     (SelectPlaylist playlist.id)
 
         TracksDeleted (Err _) ->
-            ( { model | state = Errored "Failed to delete tracks." }, Cmd.none )
+            ( { model | state = PlaylistTracks }
+            , sendError failedToDeleteTrack
+            )
 
         ToggleTrackDeletion track ->
             ( toggleTrackDeletion model track, Cmd.none )
 
         ToggleTracksDeletion ->
             ( toggleTracksDeletion model, Cmd.none )
+
+
+failedToFetchFavoriteTracks : Error.Error
+failedToFetchFavoriteTracks =
+    fetchDataError "favorite tracks"
+
+
+failedToFetchPlaylists : Error.Error
+failedToFetchPlaylists =
+    fetchDataError "playlists"
+
+
+failedToFetchPlaylistTracks : Error.Error
+failedToFetchPlaylistTracks =
+    fetchDataError "playlist tracks"
+
+
+failedToDeleteTrack : Error.Error
+failedToDeleteTrack =
+    Error
+        "I failed to delete your tracks."
+        "This may happen if the access token is outdated. You can <strong>try to log in again</strong>, it could solve the problem.<br><br>If it doesn't, <a href='https://github.com/nicoespeon/my-spotify-groomer/issues/new?title=Failed%20to%20delete%20tracks' target='_blank' rel='noopener'>please open an issue</a>. It may be a technical problem."
+        "Understood"
+        False
 
 
 playlistsOwnedByUser : UserId -> List Playlist -> List Playlist
@@ -375,9 +397,6 @@ view model =
 
         DeletingTracks ->
             loaderBlock "Deleting the track…"
-
-        Errored message ->
-            text ("An error occurred: " ++ message)
 
 
 viewPlaylistSelectForm : List Playlist -> Html Msg
