@@ -10,7 +10,7 @@ defmodule MySpotifyGroomer.SpotifyController do
     end
 
     def login_with_spotify(conn, _params) do
-        # Uses the Implicit Grant Flow: https://developer.spotify.com/web-api/authorization-guide/#implicit-grant-flow
+        # Uses the Implicit Grant Flow: https://beta.developer.spotify.com/documentation/general/guides/authorization-guide/#implicit-grant-flow
         # Downside => token can't be refreshed
         # To protect users against CSRF, we should use the `state` param.
         spotify_uri = "https://accounts.spotify.com/authorize?"
