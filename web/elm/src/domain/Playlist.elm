@@ -436,7 +436,7 @@ viewPlaylistTracks playlist isSelectingTracks =
             , p
                 []
                 [ text "Here are the "
-                , strong [] [ text (nbTracks ++ " songs ") ]
+                , strong [] [ text (nbTracks ++ " tracks ") ]
                 , text "you don't listen much in this playlist:"
                 ]
             , toggleSelectionButton isSelectingTracks
@@ -455,17 +455,17 @@ playlistDeleteButton tracks =
     in
         case nbSelectedTracks of
             "0" ->
-                disabledDeleteButton "Select songs to delete"
+                disabledDeleteButton "Select tracks to delete"
 
             "1" ->
                 deleteButton
                     AskToDeleteTracks
-                    "Delete the selected song"
+                    "Delete the selected track"
 
             _ ->
                 deleteButton
                     AskToDeleteTracks
-                    ("Delete the " ++ nbSelectedTracks ++ " selected songs")
+                    ("Delete the " ++ nbSelectedTracks ++ " selected tracks")
 
 
 toggleSelectionButton : Bool -> Html Msg
