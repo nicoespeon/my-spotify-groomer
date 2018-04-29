@@ -1,7 +1,18 @@
-<div class="text-center">
-    <h1>My Spotify Groomer</h1>
+<div class="ui middle aligned center aligned grid full-height">
+    <div class="column">
+        <div class="push-bottom">
+            <h1 class="title">
+                My Spotify Groomer
+            </h1>
 
-    <a href="/login-with-spotify" class="ui primary massive button">
-        Log in with Spotify
-    </a>
+            <p class="sub-title muted">
+                Clean your playlists from tracks you don't listen much.
+            </p>
+        </div>
+
+        <a href="/login-with-spotify" class="ui primary massive button">
+            <i class="ui icon spotify"></i>
+            Log in with Spotify
+        </a>
+    </div>
 </div>

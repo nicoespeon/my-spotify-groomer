@@ -1,14 +1,13 @@
 port module MySpotifyGroomer exposing (main)
 
 import Error exposing (Error)
-import Html exposing (Html, programWithFlags, h1, div, text, nav)
+import Html exposing (Html, programWithFlags, h1, div, text)
 import Html.Attributes exposing (class)
 import Http exposing (Request)
 import Playlist exposing (Playlist)
 import SemanticUI exposing (confirm, loader, loaderBlock)
 import Spotify exposing (Offset, Limit)
 import Track exposing (TrackUri)
-import Task exposing (Task)
 import Time exposing (Time)
 import User exposing (User, UserId)
 
@@ -155,7 +154,7 @@ view model =
             loader "Fetching data from Spotify…"
 
         Loaded ->
-            div []
+            div [ class "push-bottom" ]
                 [ mainNav model.user
                 , mainContainer
                     [ pageTitle
@@ -176,14 +175,11 @@ pageTitle =
 
 mainNav : User -> Html Msg
 mainNav user =
-    nav
+    div
         [ class "ui fixed borderless secondary pointing nav menu" ]
         [ div
             [ class "ui container" ]
-            [ div
-                [ class "header item" ]
-                [ User.view user ]
-            ]
+            [ User.view user ]
         ]
 
 

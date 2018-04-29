@@ -1,3 +1,41 @@
+
+html {
+  font-size: 16px;
+}
+
+body {
+  background: #F6F6F6;
+}
+
+h1, h2, .title-font {
+  font-family: 'Berkshire Swash', cursive;
+}
+
+.full-height {
+  height: 100%;
+}
+
+.title {
+  font-size: 4em;
+}
+
+.sub-title {
+  font-size: 2em;
+}
+
+.islet {
+  margin: auto;
+  padding: 1em;
+}
+
+.muted {
+  color: rgba(0, 0, 0, .5);
+}
+
+.push-bottom {
+  margin-bottom: 4em;
+}
+
 .text-center {
   text-align: center;
 }

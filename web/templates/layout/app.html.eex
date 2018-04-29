@@ -8,10 +8,11 @@
 
     <title>My Spotify Groomer</title>
     <link rel="stylesheet" href="<%= static_path(@conn, "/css/app.css") %>">
+    <link href="https://fonts.googleapis.com/css?family=Berkshire+Swash" rel="stylesheet">
 </head>
 
 <body>
-    <main role="main">
+    <main role="main" class="full-height">
         <%= render @view_module, @view_template, assigns %>
     </main>
 
