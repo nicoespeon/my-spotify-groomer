@@ -16,6 +16,7 @@ You don't have to install Elm as it is installed locally.
 To start the app:
 
   * Install dependencies with `npm install` - it will install Elixir deps too
+  * Build assets with `npm run build`
   * Start Phoenix endpoint with `npm start`
 
 Now you can visit [`localhost:4000`](http://localhost:4000) from your browser.
@@ -24,6 +25,7 @@ Now you can visit [`localhost:4000`](http://localhost:4000) from your browser.
 
   * `npm start` to start the phoenix server
   * `npm test` to run back & front tests
+  * `npm run build` to build assets
   * `npm run test:back` to run back-end tests
   * `npm run test:back:watch` to run back-end tests in watch mode
   * `npm run test:front` to run front-end tests
