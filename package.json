@@ -6,6 +6,7 @@
   "scripts": {
     "preinstall": "mix deps.get",
     "build": "cd semantic; gulp build",
+    "prestart": "cd web/elm; elm make src/MySpotifyGroomer.elm --output ../static/js/myspotifygroomer.js --yes",
     "start": "mix phoenix.server",
     "test:back": "mix test",
     "test:back:watch": "mix test.watch",

@@ -1,5 +1,6 @@
 web/static/vendor/*
 !web/static/vendor/jquery.min.js
+myspotifygroomer.js
 
 # Created by https://www.gitignore.io/api/elm,phoenix
 

@@ -19,6 +19,7 @@
 // paths "./socket" or full ones "web/static/js/socket".
 
 // import socket from "./socket"
+import Elm from './myspotifygroomer';
 
 ((document, window) => {
   if (!window.location.hash) return redirectToLoginPage(window);

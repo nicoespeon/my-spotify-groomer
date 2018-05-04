@@ -59,13 +59,14 @@ exports.config = {
   plugins: {
     babel: {
       // Do not use ES6 compiler in vendor code
-      ignore: [/web\/static\/vendor/]
+      ignore: [/web\/static\/vendor/, /myspotifygroomer.js$/]
     },
     elmBrunch: {
       executablePath: '../../node_modules/elm/binwrappers',
       elmFolder: 'web/elm',
       mainModules: ['src/MySpotifyGroomer.elm'],
-      outputFolder: '../static/vendor'
+      outputFolder: '../static/js',
+      outputFile: 'myspotifygroomer.js'
     }
   },
 

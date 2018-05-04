@@ -1,7 +1,8 @@
 cd $phoenix_dir
 
+npm run prestart
 npm run build
-brunch build --production
+npm run deploy
 mix "${phoenix_ex}.digest"
 
 if mix help "${phoenix_ex}.digest.clean" 1>/dev/null 2>&1; then
