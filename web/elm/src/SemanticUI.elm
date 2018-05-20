@@ -30,14 +30,14 @@ deleteButton : a -> String -> Html a
 deleteButton onClickMsg message =
     button
         [ class "ui red button", onClick onClickMsg ]
-        [ i [ class "trash outline icon" ] [], text message ]
+        [ i [ class "trash alternate outline icon" ] [], text message ]
 
 
 disabledDeleteButton : String -> Html a
 disabledDeleteButton message =
     button
         [ class "ui disabled red button" ]
-        [ i [ class "trash outline icon" ] [], text message ]
+        [ i [ class "trash alternate outline icon" ] [], text message ]
 
 
 loader : String -> Html a
